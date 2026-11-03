@@ -218,7 +218,7 @@ def create_app(api: MiniAppAPI, bot_token: str) -> web.Application:
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="ok")
 
-    app = web.Application(middlewares=[errors], client_max_size=256 * 1024)
+    app = web.Application(middlewares=[errors], client_max_size=9 * 1024 * 1024)   # фото из приложения — до ~6 МБ
     app.router.add_get("/", index)
     app.router.add_get("/healthz", health)
     app.router.add_get("/img/{name}.png", picture)
@@ -248,6 +248,9 @@ def create_app(api: MiniAppAPI, bot_token: str) -> web.Application:
     app.router.add_post("/api/class/join", post(api.join_class, "code"))
     app.router.add_post("/api/class/leave", post(api.leave_class))
     app.router.add_get("/api/privacy", privacy)
+    app.router.add_post("/api/talk", post(api.chat_send, "text", "payload"))
+    app.router.add_post("/api/talk/photo", post(api.chat_photo, "image"))
+    app.router.add_post("/api/talk/open", post(api.chat_open, "action", "params"))
     app.router.add_post("/api/delete_me", post(api.delete_me))
     app.router.add_get("/api/teacher", teacher_home)
     app.router.add_post("/api/teacher/profile", post(api.teacher_profile, "kind", "subjects", "name"))

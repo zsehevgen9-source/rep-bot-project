@@ -6,7 +6,7 @@
 """
 from typing import Any, Dict, List, Optional
 
-from app.handlers.tutor.common import GRADE_TTL, SUBJECTS, topic_progress
+from app.handlers.tutor.common import GRADE_TTL, SUBJECTS, load_json, topic_progress
 from app.handlers.tutor.interests import INTERESTS, MAX_INTERESTS
 from app.handlers.tutor.privacy import CONSENT_SHORT, POLICY, POLICY_VERSION
 from app.schemas.payloads import NormalizedMessage
@@ -14,11 +14,14 @@ from app.services import timezones
 
 
 class QuietApi:
-    """Обёртка над MAX API: сообщения пользователю, который сейчас в приложении, не отправляются, а копятся."""
+    """Обёртка над MAX API: сообщения пользователю, который сейчас в приложении, не отправляются в чат MAX,
+    а копятся в out (текст и кнопки) — приложение показывает их у себя. Уведомления другим людям уходят как обычно.
+    Фото, присланные из приложения, лежат в Redis (appimg_<id>) — бот читает их по адресу «appimg:<id>»."""
 
-    def __init__(self, real, uid: int, chat_id: Optional[int] = None):
-        self.real, self.uid, self.chat_id = real, uid, chat_id
+    def __init__(self, real, uid: int, chat_id: Optional[int] = None, redis=None):
+        self.real, self.uid, self.chat_id, self.redis = real, uid, chat_id, redis
         self.notes: List[str] = []
+        self.out: List[Dict[str, Any]] = []
 
     def _mine(self, chat_id=None, user_id=None) -> bool:
         return user_id == self.uid or (chat_id is not None and chat_id == self.chat_id)
@@ -27,6 +30,9 @@ class QuietApi:
         if self._mine(chat_id, user_id):
             if text:
                 self.notes.append(text)
+            images = [a["payload"].get("url") for a in attachments or []
+                      if a.get("type") == "image" and isinstance(a.get("payload"), dict) and a["payload"].get("url")]
+            self.out.append({"text": text or "", "buttons": (keyboard or {}).get("buttons") or [], "images": images})
             return {}
         return await self.real.send_message(chat_id=chat_id, user_id=user_id, text=text, keyboard=keyboard,
                                             attachments=attachments)
@@ -36,8 +42,20 @@ class QuietApi:
             return {}
         return await self.real.send_voice(chat_id=chat_id, audio_bytes=audio_bytes)
 
-    async def upload_image(self, *args, **kwargs):
-        return None     # картинки-карточки для чата приложению не нужны
+    async def _app_image(self, url) -> Optional[bytes]:
+        import base64
+        raw = await self.redis.get_state(f"appimg_{url[len('appimg:'):]}") if self.redis else None
+        return base64.b64decode(raw) if raw else None
+
+    async def download_image(self, url, *args, **kwargs):
+        if str(url).startswith("appimg:"):
+            return await self._app_image(url)
+        return await self.real.download_image(url, *args, **kwargs)
+
+    async def download_file(self, url, *args, **kwargs):
+        if str(url).startswith("appimg:"):
+            return await self._app_image(url)
+        return await self.real.download_file(url, *args, **kwargs)
 
     def __getattr__(self, name):
         return getattr(self.real, name)
@@ -47,7 +65,7 @@ class AccountMixin:
     """Методы MiniAppAPI для знакомства и настроек (подмешиваются в MiniAppAPI)."""
 
     def _quiet(self, h, uid: int) -> NormalizedMessage:
-        h.api = QuietApi(h.api, uid)
+        h.api = QuietApi(h.api, uid, redis=h.redis)
         return NormalizedMessage(chat_id=None, user_id=uid, message_id="", text=None, payload=None)
 
     @staticmethod
@@ -182,6 +200,96 @@ class AccountMixin:
             if isinstance(child, int):
                 await h.leave_child(self._quiet(h, uid), child)
             return {"children": await h._children_of(uid)}
+
+    # ---------- 💬 чат с Маячком прямо в приложении ----------
+
+    @staticmethod
+    def _messages(h) -> List[Dict[str, Any]]:
+        """Ответы бота для приложения: «🔊 Послушать» убираем (голос приходит только в чат MAX)."""
+        result = []
+        for m in h.api.out:
+            rows = [[b for b in row if not str(b.get("payload") or "").startswith("say_")] for row in m["buttons"]]
+            result.append({**m, "buttons": [r for r in rows if r]})
+        return result
+
+    async def chat_send(self, uid: int, text: Any = None, payload: Any = None) -> Dict[str, Any]:
+        """Сообщение или нажатие кнопки в чате приложения — бот отвечает так же, как в чате MAX."""
+        from app.webapp.api import ApiError
+        text = str(text or "").strip()[:2000]
+        payload = str(payload or "").strip()[:200]
+        if not text and not payload:
+            raise ApiError(400, "Пустое сообщение")
+        async with self._handler() as h:
+            message = self._quiet(h, uid)
+            if payload:
+                message.payload = payload
+                await h.handle_callback(message)
+            else:
+                message.text = text
+                await h.handle_message(message)
+            return {"messages": self._messages(h)}
+
+    async def chat_photo(self, uid: int, image: Any) -> Dict[str, Any]:
+        """Фото из приложения (домашка, расписание, решение задания учителя) — боту, как будто прислано в чат."""
+        import base64
+        import secrets
+        from app.webapp.api import ApiError
+        data = str(image or "")
+        if "," in data[:100]:
+            data = data.split(",", 1)[1]                    # data:image/jpeg;base64,...
+        try:
+            raw = base64.b64decode(data, validate=True)
+        except Exception:
+            raise ApiError(400, "Не получилось прочитать фото")
+        if not 1000 < len(raw) <= 6 * 1024 * 1024:
+            raise ApiError(400, "Фото слишком маленькое или слишком большое")
+        key = secrets.token_hex(8)
+        async with self._handler() as h:
+            encoded = base64.b64encode(raw).decode()
+            # Фото домашки и расписания бот разбирает сразу и забывает (живёт час, как в политике конфиденциальности)
+            await h.redis.set_state(f"appimg_{key}", encoded, ex=3600)
+            pending = load_json(await h.redis.get_state(f"asg_photo_{uid}"), None)
+            message = self._quiet(h, uid)
+            message.file_url, message.file_kind, message.file_name = f"appimg:{key}", "image", "photo.jpg"
+            await h.handle_message(message)
+            if pending:
+                # Фото решения задания учителя учитель смотрит позже — его храним 60 дней (как ссылку на фото в чате)
+                data = await h._tclass(pending[0])
+                task = next((a for a in (data or {}).get("assignments", []) if a["id"] == pending[1]), None)
+                photo = ((task or {}).get("results", {}).get(str(uid)) or {}).get("photo") or {}
+                if photo.get("url") == f"appimg:{key}":
+                    await h.redis.set_state(f"appimg_{key}", encoded, ex=60 * 86400)
+            return {"messages": self._messages(h)}
+
+    async def chat_open(self, uid: int, action: Any, params: Any) -> Dict[str, Any]:
+        """Действие из приложения (урок, разбор ошибки, домашка, задание дня, меню) — сразу в чате приложения."""
+        from app.webapp.api import ApiError
+        params = params if isinstance(params, dict) else {}
+        async with self._handler() as h:
+            grade = await self._grade(h, uid)
+            message = self._quiet(h, uid)
+            sid = params.get("subject_id")
+            if action in ("lesson", "ask_topic") and sid not in {s for _, s in SUBJECTS[grade]}:
+                raise ApiError(400, "Такого предмета нет в твоём классе")
+            await h._reset_modes(uid)
+            if action == "lesson" and str(params.get("topic") or "").strip():
+                await h.start_lesson(message, grade, sid, str(params["topic"]).strip())
+            elif action == "ask_topic":
+                await h.ask_lesson_topic(message, sid)
+            elif action == "fix" and isinstance(params.get("n"), int):
+                state = await h._test_state(uid)
+                if not state or not state.get("done") or not 0 <= params["n"] < len(state["answers"]):
+                    raise ApiError(409, "Этот тест уже устарел.", "expired")
+                await h.fix_test_question(message, params["n"])
+            elif action == "homework":
+                await h.ask_homework(message)
+            elif action == "today":
+                await h.send_daily(message)
+            elif action == "menu":
+                await h.show_subjects(message, grade)
+            else:
+                raise ApiError(400, "Неизвестное действие")
+            return {"messages": self._messages(h)}
 
     async def privacy(self) -> Dict[str, Any]:
         from app.core.config import settings as cfg

@@ -203,4 +203,8 @@ class TeacherAPIMixin:
             photo = ((task or {}).get("results", {}).get(str(student)) or {}).get("photo")
             if not photo or not photo.get("url"):
                 return None
+            if str(photo["url"]).startswith("appimg:"):          # фото прислано из приложения — лежит в Redis
+                import base64
+                raw = await h.redis.get_state(f"appimg_{photo['url'][len('appimg:'):]}")
+                return base64.b64decode(raw) if raw else None
             return await h.api.download_image(photo["url"])

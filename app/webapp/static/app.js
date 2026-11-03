@@ -25,6 +25,12 @@
   };
   const DAY_FULL = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 
+  // replaceChildren(..., null) вставил бы текст «null» — пустые части экрана просто пропускаем
+  const nativeReplace = Element.prototype.replaceChildren;
+  Element.prototype.replaceChildren = function (...kids) {
+    return nativeReplace.apply(this, kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false));
+  };
+
   const $app = document.getElementById("app");
   const $tabs = document.getElementById("tabs");
   const $toast = document.getElementById("toast");
@@ -112,12 +118,10 @@
   }
   const withChild = (path) => (S.child ? `${path}${path.includes("?") ? "&" : "?"}child=${S.child}` : path);
 
-  async function chatAction(action, params) {
-    try {
-      await api("/api/chat", Object.assign({ action }, params || {}));
-      toast("Маячок пишет тебе в чат 💬");
-      setTimeout(openChat, 700);
-    } catch (e) { toast(e.message); }
+  function chatAction(action, params) {
+    // Всё общение с Маячком — прямо в приложении (вкладка «💬 Маячок»)
+    S.talkStart = { action, params: params || {} };
+    go("talk");
   }
 
   // ---------- каркас: вкладки ----------
@@ -128,7 +132,7 @@
         ...(d.children.length ? [["kids", "👨‍👩‍👧", "Дети"]] : [])];
     }
     if (d.role !== "student") return [];
-    const tabs = [["home", "🏠", "Главная"], ["train", "🎯", "Тренажёр"], ["games", "🎮", "Игры"], ["progress", "📊", "Прогресс"], ["schedule", "🗓", "Расписание"]];
+    const tabs = [["home", "🏠", "Главная"], ["talk", "💬", "Маячок"], ["train", "🎯", "Тренажёр"], ["games", "🎮", "Игры"], ["progress", "📊", "Прогресс"]];
     if (d.children.length) tabs.push(["kids", "👨‍👩‍👧", "Дети"]);
     return tabs;
   }
@@ -164,7 +168,7 @@
     if (d.role === "teacher") return renderTeacher(d);
     if (d.role === "parent") return renderKids(d);
     const screens = {
-      home: renderHome, train: renderTrain, games: renderGames, progress: renderProgress, schedule: renderSchedule,
+      home: renderHome, talk: renderTalk, train: renderTrain, games: renderGames, progress: renderProgress, schedule: renderSchedule,
       report: renderReport, kids: renderKids,
     };
     (screens[S.tab] || renderHome)(d);
@@ -434,8 +438,11 @@
         el("div", { class: "section-head" }, el("h2", {}, "Пора повторить")), due),
       el("div", { class: "section" },
         el("div", { class: "btn-row" },
-          el("button", { class: "btn", onclick: () => go("train") }, "🎯 Тренажёр"),
-          el("button", { class: "btn secondary", onclick: () => chatAction("homework") }, "📸 Домашка"))),
+          el("button", { class: "btn", onclick: () => chatAction("today") }, "📅 Что сегодня"),
+          el("button", { class: "btn secondary", onclick: () => chatAction("homework") }, "📸 Домашка")),
+        el("div", { class: "btn-row" },
+          el("button", { class: "btn secondary", onclick: () => go("train") }, "🎯 Тренажёр"),
+          el("button", { class: "btn secondary", onclick: () => go("schedule") }, "🗓 Расписание"))),
     );
   }
 
@@ -1375,6 +1382,94 @@
     }
   }
 
+
+  // ---------- 💬 Маячок: чат с ботом прямо в приложении ----------
+
+  S.talk = [];
+
+  function renderTalk() {
+    const list = el("div", { class: "talk", id: "talk" });
+    const input = el("textarea", { class: "talk-input", rows: "1", placeholder: "Напиши Маячку…", maxlength: "2000" });
+    const file = el("input", { type: "file", accept: "image/*", hidden: true });
+    const send = () => { const t = input.value.trim(); if (!t) return; input.value = ""; talk({ text: t }, t); };
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+    file.addEventListener("change", async () => {
+      const f = file.files && file.files[0];
+      file.value = "";
+      if (!f) return;
+      try { const data = await shrinkImage(f); talkPhoto(data); } catch (e) { toast("Не получилось открыть фото"); }
+    });
+    page(list,
+      el("div", { class: "talk-bar" },
+        el("button", { class: "icon-btn", "aria-label": "Фото", onclick: () => file.click() }, "📷"),
+        input, file,
+        el("button", { class: "icon-btn send", "aria-label": "Отправить", onclick: send }, "➤")));
+    drawTalk();
+    if (S.talkStart) {
+      const start = S.talkStart; S.talkStart = null;
+      talkOpen(start.action, start.params);
+    } else if (!S.talk.length) {
+      talkOpen("menu", {});
+    }
+  }
+
+  function drawTalk(waiting) {
+    const list = document.getElementById("talk");
+    if (!list) return;
+    const last = S.talk.length - 1;
+    list.replaceChildren(...S.talk.map((m, i) => m.me
+      ? el("div", { class: "bubble me" }, m.photo ? el("img", { class: "bubble-img", src: m.photo }) : m.text)
+      : el("div", { class: "bubble bot" }, m.text,
+        (m.images || []).map((src) => el("img", { class: "bubble-img", src })),
+        m.buttons && m.buttons.length ? el("div", { class: "bubble-btns" + (i === last ? "" : " old") }, m.buttons.map((row) => el("div", { class: "bubble-row" },
+          row.map((b) => el("button", {
+            class: "bubble-btn", onclick: () => (b.url ? openLink(b.url) : talk({ payload: b.payload }, b.text)),
+          }, b.text))))) : null)),
+      ...(waiting ? [el("div", { class: "bubble bot typing" }, el("i"), el("i"), el("i"))] : []));
+    setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 30);
+  }
+
+  function openLink(url) {
+    try { if (WA && WA.openLink) return WA.openLink(url); } catch (e) { /* ниже */ }
+    window.open(url, "_blank");
+  }
+
+  async function talkRequest(path, body, echo) {
+    if (echo) S.talk.push(echo);
+    S.talkBusy = true;
+    drawTalk(true);
+    try {
+      const r = await api(path, body);
+      S.talk.push(...(r.messages || []));
+      if (!(r.messages || []).length) S.talk.push({ text: "👌" });
+    } catch (e) {
+      S.talk.push({ text: "⚠️ " + e.message });
+    }
+    S.talk = S.talk.slice(-60);
+    S.talkBusy = false;
+    drawTalk(false);
+  }
+
+  function talk(body, shown) { if (!S.talkBusy) talkRequest("/api/talk", body, { me: true, text: shown }); }
+  function talkPhoto(data) { if (!S.talkBusy) talkRequest("/api/talk/photo", { image: data }, { me: true, photo: data }); }
+  function talkOpen(action, params) { talkRequest("/api/talk/open", { action, params }); }
+
+  function shrinkImage(fileObj) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(img.src);
+        resolve(c.toDataURL("image/jpeg", 0.85));
+      };
+      img.onerror = reject;
+      img.src = URL.createObjectURL(fileObj);
+    });
+  }
+
   // ---------- демо-режим (открыто не из MAX) ----------
 
   const Demo = {
@@ -1478,6 +1573,13 @@
       if (path.startsWith("/api/teacher/student")) return { report: "Маша, 5 класс\nЗанималась 6 дней из 7, решено 31 задание.\nОценки: 5, 5, 4.\nСтоит подтянуть: Сложение дробей." };
       if (path.startsWith("/api/teacher/")) return { ok: true, code: "K7M2QX", note: "✅ Готово (демо)" };
       if (path === "/api/parent/leave") { this.role = "new"; return { children: [] }; }
+      if (path.startsWith("/api/talk")) {
+        await new Promise((r) => setTimeout(r, 600));
+        if (body && body.text) return { messages: [{ text: `Хороший вопрос! 💡 В демо-режиме я только показываю, как выглядит чат. В MAX я отвечу по-настоящему: «${body.text}»`, buttons: [] }] };
+        return { messages: [{ text: "Тренер 💪 · 640 ⚡ · 🔥 4\n\nВыбери «📚 Предметы» для обычной учёбы или нажми «📝 Подготовка к ВПР»:",
+          buttons: [[{ text: "📅 Что сегодня", payload: "today" }], [{ text: "🎁 Открыть сундук", payload: "chest" }], [{ text: "📝 Подготовка к ВПР", payload: "exam" }],
+            [{ text: "📚 Предметы", payload: "subjlist" }, { text: "📸 Домашка", payload: "hw" }]] }] };
+      }
       if (path.startsWith("/api/schedule") && !body) {
         return { days: ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб"], schedule: JSON.parse(JSON.stringify(this.schedule)),
           subjects: this.state().subjects.map((s) => ({ id: s.id, title: s.title })) };
@@ -1539,7 +1641,7 @@
 
   // ---------- старт ----------
 
-  if (["home", "train", "games", "progress", "schedule"].includes(START)) S.tab = START;
+  if (["home", "talk", "train", "games", "progress", "schedule"].includes(START)) S.tab = START;
   try { if (WA && WA.ready) WA.ready(); } catch (e) { /* необязательно */ }
   load();
 })();

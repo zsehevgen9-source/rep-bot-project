@@ -2619,7 +2619,41 @@ async def test_miniapp_account():
     assert (await A.delete_me(U))["ok"] and (await A.state(U))["role"] == "new"
     await A.teacher_class_remove(T, c); assert (await A.teacher_home(T))["classes"] == []
     assert "Политика" in (await A.privacy())["text"]
-    print("   Мини-приложение целиком: знакомство, согласие, настройки, родитель по коду, кабинет учителя: OK")
+    # 6) Чат с Маячком в приложении: меню, кнопки, текст, фото домашки, урок — ответы приходят в приложение, не в MAX
+    import base64 as _b64
+    V = 9865
+    await A.onboard_student(V, "Вася", 5, 300, True)
+    n = len(api.sent)
+    r = await A.chat_open(V, "menu", {}); m = r["messages"][-1]
+    assert "Выбери" in m["text"] and any(b.get("payload") == "games" for row in m["buttons"] for b in row) and len(api.sent) == n
+    r = await A.chat_send(V, payload="zap"); assert "Молния" in r["messages"][-1]["text"]
+    r = await A.chat_open(V, "lesson", {"subject_id": "math", "topic": "Дроби"})
+    assert any("Урок" in x["text"] and "Дроби" in x["text"] for x in r["messages"])
+    assert all(not str(b.get("payload", "")).startswith("say_") for x in r["messages"] for row in x["buttons"] for b in row)
+    r = await A.chat_open(V, "homework", {}); assert "Сфотографируй" in r["messages"][-1]["text"]
+    photo = "data:image/jpeg;base64," + _b64.b64encode(b"\xff\xd8" + b"x" * 5000).decode()
+    r = await A.chat_photo(V, photo); assert r["messages"] and len(api.sent) == n                        # всё в приложении
+    assert all(redis.d.get(k) for k in redis.d if k.startswith("appimg_"))
+    await fails(A.chat_photo(V, "data:image/jpeg;base64,!!!")); await fails(A.chat_send(V))
+    await fails(A.chat_open(V, "lesson", {"subject_id": "chem", "topic": "x"})); await fails(A.chat_open(V, "rm", {}))
+    r = await A.chat_send(V, text="а что такое дробь?"); assert r["messages"][-1]["text"] == "CHAT"
+    # фото решения задания учителя из приложения → учитель видит его в своём кабинете в приложении
+    T3 = 9866
+    await A.teacher_request(T3); await A.teacher_profile(T3, "subject", ["math"], "Олег Петрович")
+    c3 = (await A.teacher_class_new(T3, 5, "5В"))["code"]; await A.join_class(V, c3)
+    await A.teacher_assign(T3, c3, "math", "Дроби")
+    cls = json.loads(redis.d[f"tclass_{c3}"]); aid = cls["assignments"][0]["id"]
+    cls["assignments"][0]["results"][str(V)] = {"right": 4, "total": 5, "mark": 4, "date": "2026-11-03"}
+    redis.d[f"tclass_{c3}"] = json.dumps(cls, ensure_ascii=False)
+    redis.d[f"asg_photo_{V}"] = json.dumps([c3, aid])
+    pic = b"\xff\xd8" + b"photo" * 2000
+    r = await A.chat_photo(V, _b64.b64encode(pic).decode())                    # на фото «не видно записей» —
+    assert any("Не вижу на фото записей" in x["text"] for x in r["messages"])  # просим переснять, второй раз принимаем
+    r = await A.chat_photo(V, _b64.b64encode(pic).decode())
+    assert any("Фото решения получил" in x["text"] for x in r["messages"]), [x["text"] for x in r["messages"]]
+    det = await A.teacher_assignment(T3, c3, aid); assert det["students"][0]["photo"]
+    assert await A.teacher_photo(T3, c3, aid, str(V)) == pic
+    print("   Мини-приложение целиком: знакомство, согласие, настройки, родитель по коду, кабинет учителя, чат с Маячком: OK")
 
 
 asyncio.run(main())
