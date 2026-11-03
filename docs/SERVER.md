@@ -130,15 +130,19 @@ MAX открывает мини-приложение только по **https**
 
 ## Как обновлять бота
 
-1. Скачайте новый **mayachok-dlya-github.zip** и отправьте на сервер:
-   ```
-   scp mayachok-dlya-github.zip mayak@IP:~/
-   ```
-2. На сервере:
-   ```
-   bash ~/mayachok/scripts/server_update.sh
-   ```
-   Настройки `.env`, база и копии базы не затрагиваются.
+Код бота лежит на GitHub: https://github.com/zsehevgen9-source/rep-bot-project
+
+**Один раз** свяжите папку на сервере с GitHub (на сервере, команду целиком одной строкой):
+```
+cd ~/mayachok && git init -q && git remote add origin https://github.com/zsehevgen9-source/rep-bot-project.git && git fetch -q origin main && git reset -q --hard origin/main && git branch -M main && git branch -u origin/main
+```
+Файлы `.env`, база и данные учеников при этом не меняются.
+
+**Каждое обновление** — одна команда на сервере:
+```
+bash ~/mayachok/scripts/server_update.sh
+```
+Скрипт возьмёт новую версию с GitHub, пересоберёт и перезапустит бота (2–3 минуты).
 
 ## Как поменять настройку в .env
 
