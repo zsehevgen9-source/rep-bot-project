@@ -9,6 +9,7 @@
 import asyncio
 import json
 import logging
+import random
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Any, Callable, Dict, List, Optional
@@ -18,6 +19,10 @@ from app.handlers.tutor.common import (
 )
 from app.handlers.tutor.subject_test import test_size
 from app.schemas.payloads import NormalizedMessage
+from app.services import chest as chest_rules
+from app.services import flashcards as fc_rules
+from app.services import lighthouse as lh_rules
+from app.services import lightning as zap_rules
 from app.services import schedule as schedule_rules
 from app.services.levels import LEVEL_NAMES
 from app.services.programs import programs
@@ -26,6 +31,9 @@ from app.services.task_utils import normalize_answer
 logger = logging.getLogger(__name__)
 
 APP_TEST_TTL = 3 * 3600
+ZAP_GRACE = 15          # секунд сверх 60 на доставку ответа «игра закончена» (медленный интернет)
+ZAP_QUESTIONS = 40      # вопросов на одну игру (за 60 секунд больше не успеть)
+FC_DAY_GOAL = 5         # столько карточек за день — и тренировка засчитывается как занятие
 WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 GOOD = ("known", "mastered")
 
@@ -131,7 +139,22 @@ class MiniAppAPI:
         weak = [{"subject": e["subject"], "subject_id": e["subject_id"], "topic": e["topic"]}
                 for e in progress.values() if e.get("grade") == grade and e.get("status") == "weak"][:10]
         lessons = await h.today_lessons(uid)
+        lh = await h._lighthouse_state(uid)
+        nxt = lh_rules.next_milestone(lh["streak"])
+        chest = await h._chest_status(uid)
+        album = await h._chest_album(uid)
+        games = {
+            "lighthouse": {**lh, "built": lh_rules.stage(lh["streak"]), "stages": len(lh_rules.MILESTONES),
+                           "next": {"days": nxt[0], "title": nxt[1], "left": nxt[0] - lh["streak"]} if nxt else None},
+            "chest": {"ready": chest["ready"], "opened": chest["opened"], "left": chest["left"],
+                      "need": chest_rules.CHEST_NEED, "collected": chest_rules.collected(album),
+                      "total": len(chest_rules.STICKERS), "title": album.get("title")},
+            "zap": {"best": await h._zap_best(uid), "modes": [{"id": m, "title": zap_rules.MODES[m]}
+                                                              for m in h._zap_modes(grade)]},
+            "cards": {"available": grade >= 5, "due": await h.fc_due_count(uid) if grade >= 5 else 0},
+        }
         return {
+            "games": games,
             "mode": mode,
             "mode_name": rewards_rules.MODE_NAMES[mode],
             "points": points * scale,
@@ -263,6 +286,135 @@ class MiniAppAPI:
             "level_change": (after > before) - (after < before),
             "reward": reward,
         }
+
+    # ---------- ⚡ Молния: вопросы сразу пачкой, чтобы игра шла без задержек; счёт проверяет сервер ----------
+
+    async def zap_start(self, uid: int, mode: str) -> Dict[str, Any]:
+        async with self._handler() as h:
+            grade = await self._grade(h, uid)
+            if mode not in h._zap_modes(grade):
+                raise ApiError(400, "Такой игры нет для твоего класса")
+            questions = [zap_rules.question(mode, grade) for _ in range(ZAP_QUESTIONS)]
+            game = random.randint(100000, 999999)
+            await h.redis.set_state(f"zapapp_{uid}", json.dumps(
+                {"game": game, "mode": mode, "start": topic_progress.now().timestamp(),
+                 "answers": [q["answer"] for q in questions]}), ex=600)
+            return {"game": game, "mode": mode, "title": zap_rules.MODES[mode], "seconds": zap_rules.GAME_SECONDS,
+                    "lives": zap_rules.LIVES, "questions": questions,
+                    "best": (await h._zap_best(uid)).get(mode, 0)}
+
+    async def zap_finish(self, uid: int, game: Any, answers: Any) -> Dict[str, Any]:
+        async with self._handler() as h:
+            state = load_json(await h.redis.get_state(f"zapapp_{uid}"), None)
+            if not isinstance(state, dict) or state.get("game") != game:
+                raise ApiError(409, "Эта игра уже закончилась — начни новую.", "expired")
+            await h.redis.delete_state(f"zapapp_{uid}")
+            if not isinstance(answers, list) or not all(isinstance(a, int) for a in answers):
+                raise ApiError(400, "Неверный запрос")
+            if topic_progress.now().timestamp() - state["start"] > zap_rules.GAME_SECONDS + ZAP_GRACE:
+                answers = []                         # прислали слишком поздно — так не бывает у честной игры
+            score = wrong = 0
+            for given, right in zip(answers, state["answers"]):
+                if given == right:
+                    score += 1
+                else:
+                    wrong += 1
+                    if wrong >= zap_rules.LIVES:
+                        break
+            grade = await h._get_grade(uid)
+            res = await h._zap_record(uid, state["mode"], score, grade)
+            return {"score": score, "wrong": wrong, "best": res["best"], "new_record": res["new_record"],
+                    "rank": res["rank"], "reward": res["points_text"]}
+
+    # ---------- 🎁 Сундук дня и альбом ----------
+
+    async def chest_open(self, uid: int) -> Dict[str, Any]:
+        async with self._handler() as h:
+            grade = await self._grade(h, uid)
+            st = await h._chest_status(uid)
+            if st["opened"]:
+                raise ApiError(409, "Сундук дня уже открыт — новый будет завтра!", "opened")
+            if not st["ready"]:
+                raise ApiError(409, f"Сундук закрыт: реши ещё {st['left']} — и он откроется!", "locked")
+            prize = await h._chest_open(uid, grade, st["today"])
+            return {k: prize.get(k) for k in ("kind", "emoji", "name", "rarity", "duplicate", "points_text",
+                                              "collected", "total")}
+
+    async def album(self, uid: int) -> Dict[str, Any]:
+        async with self._handler() as h:
+            album = await h._chest_album(uid)
+            have = album.get("stickers") or {}
+            return {
+                "stickers": [{"id": sid, "emoji": e, "name": n, "rarity": r, "count": have.get(sid, 0)}
+                             for sid, (e, n, r) in chest_rules.STICKERS.items()],
+                "rarity_names": chest_rules.RARITY_NAMES,
+                "titles": album.get("titles") or [], "title": album.get("title"),
+                "opened": album.get("opened", 0),
+            }
+
+    # ---------- 🃏 Карточки ----------
+
+    async def cards(self, uid: int) -> Dict[str, Any]:
+        async with self._handler() as h:
+            grade = await self._grade(h, uid)
+            store = await h._fc_store(uid)
+            today = await h._fc_today(uid)
+            due = fc_rules.due_cards(store, today)
+            box = store.get("cards") or {}
+            return {
+                "due": [{"id": cid, "front": box[cid]["f"], "back": box[cid]["b"], "subject": box[cid]["s"],
+                         "topic": box[cid]["t"]} for cid in due[:fc_rules.SESSION_MAX]],
+                "due_total": len(due), "total": len(box), "learned": fc_rules.learned(store),
+                "next_due": fc_rules.next_due(store, today),
+                "decks": [d["t"] for d in (store.get("decks") or [])][-8:][::-1],
+                "subjects": [{"id": sid, "title": title} for title, sid in SUBJECTS[grade]],
+            }
+
+    async def cards_topics(self, uid: int, subject_id: str) -> Dict[str, Any]:
+        async with self._handler() as h:
+            grade = await self._grade(h, uid)
+            if subject_id not in {sid for _, sid in SUBJECTS[grade]}:
+                raise ApiError(400, "Такого предмета нет в твоём классе")
+            topics = list(dict.fromkeys(reversed(await h.program_passed(uid, grade, subject_id))))[:8]
+            return {"topics": topics}
+
+    async def cards_new(self, uid: int, subject_id: str, topic: Any) -> Dict[str, Any]:
+        async with self._handler() as h:
+            grade = await self._grade(h, uid)
+            if grade < 5:
+                raise ApiError(400, "Карточки — с 5 класса")
+            if subject_id not in {sid for _, sid in SUBJECTS[grade]}:
+                raise ApiError(400, "Такого предмета нет в твоём классе")
+            topic = " ".join(str(topic or "").split())[:100]
+            if len(topic) < 2:
+                raise ApiError(400, "Напиши тему")
+            added, error = await h._fc_build(uid, grade, subject_id, topic)
+            if error == "limit":
+                raise ApiError(429, "На сегодня новые наборы закончились — приходи завтра!", "limit")
+            if error:
+                raise ApiError(503, "Не получилось составить карточки — попробуй ещё раз или другую тему.", "retry")
+            return {"added": added, "topic": topic}
+
+    async def cards_grade(self, uid: int, card: Any, remembered: Any) -> Dict[str, Any]:
+        async with self._handler() as h:
+            store = await h._fc_store(uid)
+            if not isinstance(card, str) or card not in (store.get("cards") or {}) or not isinstance(remembered, bool):
+                raise ApiError(400, "Неверный запрос")
+            today = await h._fc_today(uid)
+            fc_rules.grade_card(store, card, remembered, today)
+            await h._fc_save(uid, store)
+            # 5 карточек за день = занятие (серия маяка, очки, сундук) — один раз в день
+            day = load_json(await h.redis.get_state(f"fcapp_{uid}"), {})
+            if day.get("date") != today.isoformat():
+                day = {"date": today.isoformat(), "n": 0, "done": False}
+            day["n"] += 1
+            reward = ""
+            if day["n"] >= FC_DAY_GOAL and not day["done"]:
+                day["done"] = True
+                reward = (await h._count_solved(uid, 1)).strip()
+            await h.redis.set_state(f"fcapp_{uid}", json.dumps(day), ex=2 * 86400)
+            return {"ok": True, "box": store["cards"][card]["box"], "due": store["cards"][card]["due"],
+                    "reward": reward, "learned": fc_rules.learned(store)}
 
     # ---------- действия в чате: бот продолжает разговор там ----------
 

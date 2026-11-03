@@ -645,3 +645,15 @@ def lightning_card(name: str, mode_title: str, score: int, best: int, new_record
         draw.text((x + 22, y + 157), label, font=font(26, True), fill=color)
         x += tw_ + 64
     return _png(image)
+
+
+def lighthouse_scene(built: int, milestones: Sequence[Tuple[int, str]], width: int = 720) -> bytes:
+    """Только картинка маяка (без панели с цифрами) — для мини-приложения. Одинакова для всех на этом этапе."""
+    built = max(0, min(int(built), len(milestones)))
+    streak = milestones[built - 1][0] if built else 0
+    full = Image.open(io.BytesIO(lighthouse_card("", streak, streak, True, milestones)))
+    scene = full.crop((0, 0, W, 760)).convert("RGB")
+    scene = scene.resize((width, round(760 * width / W)), Image.LANCZOS)
+    buf = io.BytesIO()
+    scene.save(buf, "JPEG", quality=85, optimize=True)
+    return buf.getvalue()

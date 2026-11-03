@@ -21,6 +21,7 @@ from app.webapp.auth import validate_init_data
 logger = logging.getLogger(__name__)
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 MOODS = ("happy", "cheer", "wink")
+from app.services.lighthouse import MILESTONES as LH_MILESTONES  # noqa: E402  (картинки маяка: /img/lh0..lh9.png)
 
 
 def _json(data: Any, status: int = 200) -> web.Response:
@@ -92,12 +93,18 @@ def create_app(api: MiniAppAPI, bot_token: str) -> web.Application:
             from app.services.mascot import avatar, mascot
             if name == "avatar":
                 image = await asyncio.to_thread(avatar, 256)
+            elif name.startswith("lh") and name[2:].isdigit() and int(name[2:]) <= len(LH_MILESTONES):
+                from app.services.cards import lighthouse_scene
+                body_ = await asyncio.to_thread(lighthouse_scene, int(name[2:]), LH_MILESTONES)
+                images[name] = body_
+                return web.Response(body=body_, content_type="image/jpeg",
+                                    headers={"Cache-Control": "public, max-age=86400"})
             elif name in MOODS:
                 image = await asyncio.to_thread(mascot, 360, name)
             else:
                 raise web.HTTPNotFound()
             images[name] = _png(image)
-        return web.Response(body=images[name], content_type="image/png",
+        return web.Response(body=images[name], content_type="image/jpeg" if name.startswith("lh") else "image/png",
                             headers={"Cache-Control": "public, max-age=86400"})
 
     async def state(request: web.Request) -> web.Response:
@@ -128,6 +135,38 @@ def create_app(api: MiniAppAPI, bot_token: str) -> web.Application:
         data = await body(request)
         return _json(await api.chat_action(uid, str(data.get("action") or ""), data))
 
+    async def zap_start(request: web.Request) -> web.Response:
+        uid = user_id(request)
+        data = await body(request)
+        return _json(await api.zap_start(uid, str(data.get("mode") or "")))
+
+    async def zap_finish(request: web.Request) -> web.Response:
+        uid = user_id(request)
+        data = await body(request)
+        return _json(await api.zap_finish(uid, data.get("game"), data.get("answers")))
+
+    async def chest_open(request: web.Request) -> web.Response:
+        return _json(await api.chest_open(user_id(request)))
+
+    async def album(request: web.Request) -> web.Response:
+        return _json(await api.album(user_id(request)))
+
+    async def cards_get(request: web.Request) -> web.Response:
+        return _json(await api.cards(user_id(request)))
+
+    async def cards_topics(request: web.Request) -> web.Response:
+        return _json(await api.cards_topics(user_id(request), str(request.query.get("subject_id") or "")))
+
+    async def cards_new(request: web.Request) -> web.Response:
+        uid = user_id(request)
+        data = await body(request)
+        return _json(await api.cards_new(uid, str(data.get("subject_id") or ""), data.get("topic")))
+
+    async def cards_grade(request: web.Request) -> web.Response:
+        uid = user_id(request)
+        data = await body(request)
+        return _json(await api.cards_grade(uid, data.get("id"), data.get("remembered")))
+
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="ok")
 
@@ -141,6 +180,14 @@ def create_app(api: MiniAppAPI, bot_token: str) -> web.Application:
     app.router.add_post("/api/train/start", train_start)
     app.router.add_post("/api/train/answer", train_answer)
     app.router.add_post("/api/chat", chat)
+    app.router.add_post("/api/zap/start", zap_start)
+    app.router.add_post("/api/zap/finish", zap_finish)
+    app.router.add_post("/api/chest/open", chest_open)
+    app.router.add_get("/api/album", album)
+    app.router.add_get("/api/cards", cards_get)
+    app.router.add_get("/api/cards/topics", cards_topics)
+    app.router.add_post("/api/cards/new", cards_new)
+    app.router.add_post("/api/cards/grade", cards_grade)
     app.router.add_route("OPTIONS", "/api/{tail:.*}", preflight)
     app.router.add_static("/static/", STATIC)
     return app

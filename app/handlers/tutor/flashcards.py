@@ -96,27 +96,41 @@ class FlashcardsMixin:
         if not grade or len(topic) < 2:
             await self.show_flashcards(message)
             return
+        async def wait() -> None:
+            await self.answer(message, f"🃏 Составляю карточки по теме «{topic}»… ⏳")
+            await self._typing(message)
+
+        added, error = await self._fc_build(uid, grade, subject_id, topic, on_wait=wait)
+        if error == "limit":
+            await self._ai_limit_reached(message)
+            return
+        if error:
+            await self._quiet(message, "Не получилось составить карточки — попробуй ещё раз или другую тему.",
+                              keyboard=_kb([[_btn("➕ Новый набор", "fc_new")], [_back("fc")]]))
+            return
+        note = (f"✅ Набор «{topic}»: {added} новых карточек.\n\n" if added
+                else f"Карточки по теме «{topic}» у тебя уже есть.\n\n")
+        await self.show_flashcards(message, note)
+
+    async def _fc_build(self, uid: int, grade: int, subject_id: str, topic: str, on_wait=None):
+        """Набор карточек по теме (из кеша класса или от ИИ) → в коробки ученика.
+        Возвращает (сколько новых, ошибка): ошибка "limit" — лимит ИИ на сегодня, "failed" — ИИ не справился."""
         title = subject_title(grade, subject_id)
         cache_key = f"fcdeck:{grade}:{subject_id}:{topic.lower()}"
         cards = load_json(await self.redis.get_state(cache_key), None)
         if not cards:
             if not await self._ai_spend(uid):
-                await self._ai_limit_reached(message)
-                return
-            await self.answer(message, f"🃏 Составляю карточки по теме «{topic}»… ⏳")
-            await self._typing(message)
+                return None, "limit"
+            if on_wait:
+                await on_wait()
             cards = await ai_client.flashcards(grade, title, topic, fc_rules.DECK_SIZE)
             if not cards:
-                await self._quiet(message, "Не получилось составить карточки — попробуй ещё раз или другую тему.",
-                                  keyboard=_kb([[_btn("➕ Новый набор", "fc_new")], [_back("fc")]]))
-                return
+                return None, "failed"
             await self.redis.set_state(cache_key, json.dumps(cards, ensure_ascii=False), ex=60 * DAY)
         store = await self._fc_store(uid)
         added = fc_rules.add_deck(store, cards, title, topic, await self._fc_today(uid))
         await self._fc_save(uid, store)
-        note = (f"✅ Набор «{topic}»: {added} новых карточек.\n\n" if added
-                else f"Карточки по теме «{topic}» у тебя уже есть.\n\n")
-        await self.show_flashcards(message, note)
+        return added, None
 
     # ---------- тренировка ----------
 

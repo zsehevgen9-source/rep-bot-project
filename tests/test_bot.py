@@ -2474,9 +2474,79 @@ def test_redis_transfer():
     print("   Переезд на сервер: данные Redis выгружаются и загружаются с тем же сроком жизни: OK")
 
 
+async def test_miniapp_games():
+    """Мини-приложение: Мой маяк и Сундук в данных, Молния (счёт на сервере), сундук, альбом, карточки, картинка маяка."""
+    from contextlib import asynccontextmanager
+    import app.services.progress as prog
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    from app.webapp.api import ApiError, MiniAppAPI
+    @asynccontextmanager
+    async def session_factory():
+        yield db
+    A = MiniAppAPI(lambda session: UserHandler(api, session, redis), session_factory, "mayachok_bot")
+    G = 9851
+    await say(G, "/start"); await say(G, "Гриша"); await press(G, "grade_6")
+    st = await A.state(G); g = st["games"]
+    assert g["lighthouse"]["built"] == 0 and g["lighthouse"]["next"]["title"] == "фундамент"
+    assert g["chest"] == {"ready": False, "opened": False, "left": 3, "need": 3, "collected": 0, "total": 30, "title": None}
+    assert [m["id"] for m in g["zap"]["modes"]] == ["math", "eng"] and g["cards"] == {"available": True, "due": 0}
+    # Молния: вопросы пачкой, счёт считает сервер (3 ошибки — конец), рекорд
+    real_now = prog.now; clock = [_dt(2026, 11, 2, 10, 0, tzinfo=_tz.utc)]; prog.now = lambda: clock[0]
+    try:
+        z = await A.zap_start(G, "math")
+        assert len(z["questions"]) == 40 and z["seconds"] == 60 and z["lives"] == 3
+        right = [q["answer"] for q in z["questions"]]
+        bad = lambda i: (right[i] + 1) % len(z["questions"][i]["options"])
+        answers = right[:5] + [bad(5)] + right[6:8] + [bad(8), bad(9)] + right[10:20]   # 3-я ошибка — на 10-м
+        clock[0] += _td(seconds=59)
+        r = await A.zap_finish(G, z["game"], answers)
+        assert r["score"] == 7 and r["wrong"] == 3 and r["new_record"] and r["best"] == 7 and r["reward"]
+        try: await A.zap_finish(G, z["game"], answers); assert False
+        except ApiError as e: assert e.code == "expired"                                    # второй раз нельзя
+        z = await A.zap_start(G, "math"); clock[0] += _td(seconds=120)
+        r = await A.zap_finish(G, z["game"], [q["answer"] for q in z["questions"]])
+        assert r["score"] == 0 and r["best"] == 7                                           # слишком поздно
+        try: await A.zap_start(G, "chess"); assert False
+        except ApiError as e: assert e.status == 400
+    finally:
+        prog.now = real_now
+    # Сундук: закрыт → 3 задания → открыт один раз
+    try: await A.chest_open(G); assert False
+    except ApiError as e: assert e.code == "locked"
+    h = UserHandler(api, db, redis)
+    for _ in range(3): await h._count_solved(G, 1)
+    assert (await A.state(G))["games"]["chest"]["ready"]
+    p = await A.chest_open(G); assert p["kind"] == "sticker" and p["collected"] == 1 and p["emoji"]
+    try: await A.chest_open(G); assert False
+    except ApiError as e: assert e.code == "opened"
+    al = await A.album(G); assert len(al["stickers"]) == 30 and sum(1 for s in al["stickers"] if s["count"]) == 1
+    st = await A.state(G); assert st["games"]["lighthouse"]["built"] == 1 and st["games"]["lighthouse"]["today"]
+    # Карточки: набор, повторение, 5 карточек за день = занятие (один раз)
+    tp = await A.cards_topics(G, "hist"); assert isinstance(tp["topics"], list)
+    n = await A.cards_new(G, "hist", "Древний Рим"); assert n["added"] == 5
+    c = await A.cards(G); assert c["due_total"] == 5 and c["due"][0]["front"] and "Древний Рим" in c["decks"]
+    before = db.rows[G].streak_days
+    for i, card in enumerate(c["due"]):
+        r = await A.cards_grade(G, card["id"], i != 0)
+        assert bool(r["reward"]) == (i == 4)
+    assert (await A.cards(G))["due_total"] == 1 and db.rows[G].streak_days == before
+    for bad_args in (("nope", True), (c["due"][1]["id"], "yes")):
+        try: await A.cards_grade(G, *bad_args); assert False
+        except ApiError as e: assert e.status == 400
+    try: await A.cards_new(G, "chem", "Атомы"); assert False
+    except ApiError as e: assert e.status == 400
+    # картинка маяка для приложения
+    from app.services import cards as _cards, lighthouse as _L
+    if _cards.available():
+        assert _cards.lighthouse_scene(5, _L.MILESTONES)[:2] == b"\xff\xd8"                 # JPEG
+    await press(G, "delete_me_yes"); assert f"fcapp_{G}" not in redis.d
+    print("   Мини-приложение: маяк, сундук и альбом, Молния со счётом на сервере, карточки: OK")
+
+
 asyncio.run(main())
 asyncio.run(test_visual())
 asyncio.run(test_miniapp())
+asyncio.run(test_miniapp_games())
 asyncio.run(test_savings())
 asyncio.run(test_consent())
 asyncio.run(test_teacher())

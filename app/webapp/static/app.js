@@ -128,7 +128,7 @@
         ...(d.children.length ? [["kids", "👨‍👩‍👧", "Дети"]] : [])];
     }
     if (d.role !== "student") return [];
-    const tabs = [["home", "🏠", "Главная"], ["train", "🎯", "Тренажёр"], ["progress", "📊", "Прогресс"], ["schedule", "🗓", "Расписание"]];
+    const tabs = [["home", "🏠", "Главная"], ["train", "🎯", "Тренажёр"], ["games", "🎮", "Игры"], ["progress", "📊", "Прогресс"], ["schedule", "🗓", "Расписание"]];
     if (d.children.length) tabs.push(["kids", "👨‍👩‍👧", "Дети"]);
     return tabs;
   }
@@ -163,7 +163,7 @@
     if (d.role === "new") return renderNew(d);
     if (d.role === "parent") return renderKids(d);
     const screens = {
-      home: renderHome, train: renderTrain, progress: renderProgress, schedule: renderSchedule,
+      home: renderHome, train: renderTrain, games: renderGames, progress: renderProgress, schedule: renderSchedule,
       report: renderReport, kids: renderKids,
     };
     (screens[S.tab] || renderHome)(d);
@@ -250,6 +250,8 @@
     page(
       heroBlock(d, `${hello}, ${d.name || "друг"}!`, lessons.length ? "Готов закрепить сегодняшние уроки?" : "Чем займёмся сегодня?", "happy"),
       statTiles(d),
+      d.games ? chestBanner(d.games.chest) : null,
+      d.games ? el("div", { class: "section" }, lighthouseCard(d.games.lighthouse)) : null,
       el("div", { class: "section" },
         el("div", { class: "section-head" }, el("h2", {}, `Сегодня · ${d.today.weekday}`)), todayBlock),
       el("div", { class: "section" },
@@ -634,6 +636,349 @@
     );
   }
 
+
+  // ---------- игры: Мой маяк, Сундук дня, Молния, Карточки ----------
+
+  function lighthouseCard(lh, big) {
+    const next = lh.next;
+    const share = next ? Math.min(1, lh.streak / next.days) : 1;
+    let note;
+    if (lh.at_risk) note = "🧊 Вчера был пропуск — заморозка держит серию. Позанимайся сегодня!";
+    else if (lh.today) note = "Сегодня ты уже занимался ✅";
+    else if (lh.streak) note = "Сегодня ещё не занимался — реши задание, чтобы маяк рос.";
+    else note = "Позанимайся сегодня — и появится фундамент маяка.";
+    return el("button", { class: "lh-card" + (big ? " big" : ""), onclick: () => (S.tab === "games" ? lighthouseSheet(lh) : go("games")) },
+      el("img", { class: "lh-scene", src: `img/lh${lh.built}.png`, alt: "Мой маяк" }),
+      el("div", { class: "lh-info" },
+        el("div", { class: "lh-title" }, "🗼 Мой маяк",
+          el("span", { class: "lh-streak" }, `🔥 ${lh.streak}`)),
+        el("div", { class: "lh-next" }, next ? `До «${next.title}»: ещё ${next.left} ${plural(next.left, "день", "дня", "дней")}` : "Маяк построен полностью! 🎆"),
+        el("div", { class: "bar" }, el("i", { style: `width:${Math.round(share * 100)}%;background:var(--orange)` })),
+        el("div", { class: "lh-chips" },
+          el("span", { class: "chip" }, `🏆 рекорд ${lh.best}`),
+          el("span", { class: "chip" }, lh.freeze ? "🧊 заморозка есть" : "🧊 на след. неделе")),
+        el("p", { class: "muted lh-note" }, note)));
+  }
+
+  function lighthouseSheet(lh) {
+    const titles = ["фундамент", "стены маяка", "окна и дверь", "флаг на крыше", "огонь маяка", "чайки", "лодка у причала", "звёздное небо", "праздничный салют"];
+    const days = [1, 2, 3, 5, 7, 10, 14, 21, 30];
+    sheet(
+      el("h2", {}, "🗼 Мой маяк"),
+      el("p", { class: "muted", style: "margin:6px 0 14px" }, "Каждый день занятий — новый этап. Выходные серию не прерывают. Заморозка раз в неделю спасает серию, если пропущен один день."),
+      el("div", { class: "list" }, titles.map((t, i) => el("div", { class: "item" + (lh.streak >= days[i] ? "" : " dim") },
+        el("div", { class: "ico", style: tint(lh.streak >= days[i] ? "#f59e0b" : "#9ca3af") }, lh.streak >= days[i] ? "✓" : days[i]),
+        el("div", { class: "body" }, el("div", { class: "title" }, t), el("div", { class: "meta" }, `${days[i]} ${plural(days[i], "день", "дня", "дней")} подряд`))))));
+  }
+
+  function chestBanner(ch) {
+    if (ch.ready) {
+      return el("div", { class: "section" }, el("button", { class: "chest-banner ready", onclick: openChest },
+        el("span", { class: "chest-ico" }, "🎁"),
+        el("div", { class: "body" }, el("div", { class: "title" }, "Сундук дня готов!"), el("div", { class: "meta" }, "Нажми, чтобы открыть")),
+        el("span", { class: "go" }, "›")));
+    }
+    const text = ch.opened ? "Сундук открыт — новый завтра" : `До сундука: ещё ${ch.left} ${plural(ch.left, "задание", "задания", "заданий")}`;
+    return el("div", { class: "section" }, el("button", { class: "chest-banner", onclick: openAlbum },
+      el("span", { class: "chest-ico" }, ch.opened ? "📒" : "🔒"),
+      el("div", { class: "body" }, el("div", { class: "title" }, text),
+        el("div", { class: "bar" }, el("i", { style: `width:${ch.opened ? 100 : pct(ch.need - ch.left, ch.need)}%;background:var(--gold)` })),
+        el("div", { class: "meta" }, `Альбом: ${ch.collected} из ${ch.total}`)),
+      el("span", { class: "go" }, "›")));
+  }
+
+  function renderGames(d) {
+    const g = d.games;
+    const best = g.zap.best || {};
+    page(
+      el("div", { class: "section-head", style: "margin-top:4px" }, el("h2", { style: "font-size:26px" }, "Игры"),
+        el("span", { class: "note" }, "учимся играя")),
+      el("div", { class: "game zap" },
+        el("div", { class: "game-head" }, el("span", { class: "game-ico" }, "⚡"),
+          el("div", {}, el("div", { class: "game-title" }, "Молния"), el("div", { class: "game-sub" }, "60 секунд · 3 жизни · кто больше?"))),
+        el("div", { class: "btn-row" }, g.zap.modes.map((m) => el("button", { class: "btn light", onclick: () => startZap(m.id) },
+          m.title, best[m.id] ? el("small", {}, ` 🏆${best[m.id]}`) : null)))),
+      g.cards.available ? el("button", { class: "game cards", onclick: () => openCards() },
+        el("div", { class: "game-head" }, el("span", { class: "game-ico" }, "🃏"),
+          el("div", {}, el("div", { class: "game-title" }, "Карточки"),
+            el("div", { class: "game-sub" }, g.cards.due ? `Пора повторить: ${g.cards.due}` : "Термины, даты, формулы — запоминаем надолго")),
+          el("span", { class: "go" }, "›"))) : null,
+      el("button", { class: "game chest", onclick: g.chest.ready ? openChest : openAlbum },
+        el("div", { class: "game-head" }, el("span", { class: "game-ico" + (g.chest.ready ? " shake" : "") }, "🎁"),
+          el("div", {}, el("div", { class: "game-title" }, g.chest.ready ? "Сундук дня — открыть!" : "Сундук и альбом"),
+            el("div", { class: "game-sub" }, g.chest.ready ? "Внутри наклейка, факт, звание или очки"
+              : g.chest.opened ? `Сегодня открыт · альбом ${g.chest.collected}/${g.chest.total}`
+                : `Откроется после ${g.chest.need} заданий · ещё ${g.chest.left}`)),
+          el("span", { class: "go" }, "›"))),
+      el("div", { class: "section" }, lighthouseCard(g.lighthouse, true)),
+    );
+  }
+
+  // ---- ⚡ Молния ----
+
+  async function startZap(mode) {
+    S.quiz = { loading: true };
+    renderTabs();
+    setBack(() => go("games"));
+    page(el("div", { class: "loading" }, el("div", { class: "zap-big" }, "⚡"), el("h2", {}, "Готовлю вопросы…")));
+    let game;
+    try { game = await api("/api/zap/start", { mode }); } catch (e) {
+      S.quiz = null; toast(e.message); go("games"); return;
+    }
+    const z = { game, i: 0, score: 0, lives: game.lives, answers: [], over: false, start: 0, timer: null };
+    S.quiz = { zap: z };
+    setBack(() => {
+      let close;
+      close = sheet(el("h2", {}, "Остановить игру?"),
+        el("div", { class: "btn-row" },
+          el("button", { class: "btn secondary", onclick: () => close() }, "Играть дальше"),
+          el("button", { class: "btn", onclick: () => { close(); zapEnd(z, "stop"); } }, "Стоп")));
+    });
+    // Обратный отсчёт 3-2-1
+    for (const n of ["3", "2", "1"]) {
+      if (!S.quiz || S.quiz.zap !== z) return;
+      page(el("div", { class: "countdown" }, el("span", {}, n), el("p", {}, game.title)));
+      await new Promise((r) => setTimeout(r, 700));
+    }
+    if (!S.quiz || S.quiz.zap !== z) return;
+    z.start = performance.now();
+    zapDraw(z);
+    const tick = () => {
+      if (z.over || !S.quiz || S.quiz.zap !== z) return;
+      const left = Math.max(0, game.seconds - (performance.now() - z.start) / 1000);
+      const bar = document.getElementById("zap-time");
+      const num = document.getElementById("zap-sec");
+      if (bar) { bar.style.width = `${(100 * left) / game.seconds}%`; bar.classList.toggle("hurry", left < 10); }
+      if (num) num.textContent = Math.ceil(left);
+      if (left <= 0) return zapEnd(z, "time");
+      z.timer = requestAnimationFrame(tick);
+    };
+    z.timer = requestAnimationFrame(tick);
+  }
+
+  function zapDraw(z, flash) {
+    const q = z.game.questions[z.i];
+    if (!q) return zapEnd(z, "done");
+    const hearts = "❤️".repeat(z.lives) + "🖤".repeat(z.game.lives - z.lives);
+    page(
+      el("div", { class: "zap-top" },
+        el("span", { class: "zap-score" }, `⚡ ${z.score}`),
+        el("span", { class: "zap-lives" }, hearts),
+        el("span", { class: "zap-sec", id: "zap-sec" }, z.game.seconds)),
+      el("div", { class: "bar zap-bar" }, el("i", { id: "zap-time", style: "width:100%" })),
+      el("div", { class: "zap-q" + (flash ? ` ${flash}` : "") }, q.text),
+      el("div", { class: "zap-options" + (q.options.length > 3 ? " four" : "") }, q.options.map((o, i) => el("button", {
+        class: "zap-opt", onclick: (ev) => zapAnswer(z, i, ev.currentTarget),
+      }, o))),
+      el("p", { class: "muted", style: "text-align:center;margin-top:14px", id: "zap-hint" }, flash === "bad" ? `Было: ${z.lastRight}` : " "),
+    );
+    const left = Math.max(0, z.game.seconds - (performance.now() - z.start) / 1000);
+    const bar = document.getElementById("zap-time");
+    if (bar) bar.style.width = `${(100 * left) / z.game.seconds}%`;
+    const num = document.getElementById("zap-sec");
+    if (num) num.textContent = Math.ceil(left);
+  }
+
+  function zapAnswer(z, choice, button) {
+    if (z.over || z.lock) return;
+    const q = z.game.questions[z.i];
+    const ok = choice === q.answer;
+    z.answers.push(choice);
+    z.lock = true;
+    button.classList.add(ok ? "right" : "wrong");
+    try { if (WA && WA.HapticFeedback) WA.HapticFeedback.impactOccurred(ok ? "light" : "heavy"); } catch (e) { /* нет вибрации */ }
+    if (ok) z.score += 1; else { z.lives -= 1; z.lastRight = q.options[q.answer]; }
+    setTimeout(() => {
+      z.lock = false;
+      if (z.over) return;
+      if (z.lives <= 0) return zapEnd(z, "lives");
+      z.i += 1;
+      zapDraw(z, ok ? "good" : "bad");
+    }, ok ? 180 : 450);
+  }
+
+  async function zapEnd(z, why) {
+    if (z.over) return;
+    z.over = true;
+    cancelAnimationFrame(z.timer);
+    page(el("div", { class: "loading" }, el("div", { class: "zap-big" }, "⚡"), el("h2", {}, "Считаю очки…")));
+    let res;
+    try { res = await api("/api/zap/finish", { game: z.game.game, answers: z.answers }); } catch (e) {
+      S.quiz = null; toast(e.message); go("games"); return;
+    }
+    if (res.new_record) confetti();
+    const head = { time: "⏱ Время вышло!", lives: "💔 Жизни закончились", stop: "⏹ Игра остановлена", done: "🏁 Вопросы закончились!" }[why];
+    setBack(() => refresh("games"));
+    page(el("div", { class: "result zap-result" },
+      el("p", { class: "muted", style: "font-weight:800" }, head),
+      el("div", { class: "zap-score-big" }, res.score),
+      el("p", { style: "font-weight:900;font-size:18px" }, `${plural(res.score, "верный ответ", "верных ответа", "верных ответов")} · ${res.rank}`),
+      res.new_record ? el("div", { class: "record" }, "🎉 НОВЫЙ РЕКОРД!") : el("p", { class: "muted", style: "margin-top:6px" }, `🏆 Рекорд: ${res.best}`),
+      res.reward ? el("p", { style: "margin-top:10px;font-weight:800" }, res.reward) : null),
+      el("div", { class: "btn-row", style: "margin-top:24px" },
+        el("button", { class: "btn secondary", onclick: () => { S.quiz = null; refresh("games"); } }, "К играм"),
+        el("button", { class: "btn", onclick: () => startZap(z.game.mode) }, "⚡ Ещё раз")));
+  }
+
+  // ---- 🎁 Сундук ----
+
+  async function openChest() {
+    S.quiz = { chest: true };
+    renderTabs();
+    setBack(null);
+    page(el("div", { class: "chest-open" }, el("div", { class: "chest-box shake" }, "🎁"), el("h2", {}, "Открываем сундук…")));
+    const wait = new Promise((r) => setTimeout(r, 1400));
+    let prize;
+    try { [prize] = await Promise.all([api("/api/chest/open", {}), wait]); } catch (e) {
+      S.quiz = null; toast(e.message); refresh(S.tab); return;
+    }
+    const label = { common: "Обычная наклейка", rare: "✨ Редкая наклейка", legendary: "🌟 Легендарная наклейка",
+      fact: "💡 Интересный факт", title: "🏅 Новое звание", bonus: "💰 Бонусные очки" }[prize.rarity] || "";
+    if (["rare", "legendary", "title"].includes(prize.rarity)) confetti();
+    let note = "";
+    if (prize.kind === "sticker") note = prize.duplicate ? `Такая уже есть — повторка превращается в очки: ${prize.points_text}` : `В альбоме: ${prize.collected} из ${prize.total}`;
+    else if (prize.kind === "title") note = "Теперь его видно в меню бота 😎";
+    else note = prize.points_text || "";
+    setBack(() => { S.quiz = null; refresh(S.tab); });
+    page(
+      el("div", { class: `prize r-${prize.rarity}` },
+        el("div", { class: "prize-label" }, label),
+        el("div", { class: "prize-emoji" }, prize.emoji),
+        el("div", { class: "prize-name" + (prize.kind === "fact" ? " fact" : "") }, prize.name),
+        note ? el("div", { class: "prize-note" }, note) : null),
+      el("p", { class: "muted", style: "text-align:center;margin-top:12px" }, "Следующий сундук — завтра"),
+      el("div", { class: "btn-row" },
+        el("button", { class: "btn secondary", onclick: () => { S.quiz = null; openAlbum(); } }, "📒 Альбом"),
+        el("button", { class: "btn", onclick: () => { S.quiz = null; refresh(S.tab); } }, "Готово")));
+  }
+
+  async function openAlbum() {
+    S.quiz = { album: true };
+    renderTabs();
+    setBack(() => { S.quiz = null; refresh("games"); });
+    page(el("div", { class: "empty" }, "Открываю альбом…"));
+    let a;
+    try { a = await api("/api/album"); } catch (e) { S.quiz = null; toast(e.message); go("games"); return; }
+    const have = a.stickers.filter((s) => s.count).length;
+    const groups = [["common", "Обычные"], ["rare", "Редкие ✨"], ["legendary", "Легендарные 🌟"]];
+    page(
+      el("div", { class: "section-head", style: "margin-top:4px" }, el("h2", { style: "font-size:26px" }, "📒 Альбом"),
+        el("span", { class: "note" }, `${have} из ${a.stickers.length}`)),
+      el("div", { class: "bar", style: "height:12px" }, el("i", { style: `width:${pct(have, a.stickers.length)}%;background:var(--gold)` })),
+      ...groups.map(([r, name]) => {
+        const list = a.stickers.filter((s) => s.rarity === r);
+        return el("div", { class: "section" },
+          el("div", { class: "section-head" }, el("h2", {}, name), el("span", { class: "note" }, `${list.filter((s) => s.count).length}/${list.length}`)),
+          el("div", { class: "album" }, list.map((s) => el("button", {
+            class: `sticker r-${r}` + (s.count ? "" : " missing"),
+            onclick: () => toast(s.count ? `${s.name}${s.count > 1 ? ` · ×${s.count}` : ""}` : "Ещё не найдена — открывай сундуки!"),
+          }, el("span", { class: "s-emoji" }, s.count ? s.emoji : "❔"), el("span", { class: "s-name" }, s.count ? s.name : "???")))));
+      }),
+      a.titles.length ? el("div", { class: "section" }, el("div", { class: "section-head" }, el("h2", {}, "🏅 Звания")),
+        el("div", { class: "picker" }, a.titles.map((t) => el("span", { class: "chip" + (t === a.title ? " gold" : "") }, t)))) : null,
+      el("p", { class: "muted", style: "margin:16px 4px 0;font-size:14px" }, "Сундук открывается раз в день после 3 решённых заданий. Повторка превращается в очки, а если 7 сундуков подряд без редкой — следующая точно редкая ✨"),
+    );
+  }
+
+  // ---- 🃏 Карточки ----
+
+  async function openCards(note) {
+    S.quiz = { cards: true };
+    renderTabs();
+    setBack(() => { S.quiz = null; refresh("games"); });
+    page(el("div", { class: "empty" }, "Достаю карточки…"));
+    let c;
+    try { c = await api("/api/cards"); } catch (e) { S.quiz = null; toast(e.message); go("games"); return; }
+    if (typeof note === "string" && note) toast(note, 3200);
+    const months = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+    const nice = (iso) => { const [, m, dd] = iso.split("-").map(Number); return `${dd} ${months[m - 1]}`; };
+    page(
+      el("div", { class: "section-head", style: "margin-top:4px" }, el("h2", { style: "font-size:26px" }, "🃏 Карточки"),
+        el("span", { class: "note" }, `запомнено ${c.learned} из ${c.total}`)),
+      c.due.length ? el("button", { class: "btn", onclick: () => cardsSession(c.due) }, `🔁 Повторить (${c.due_total})`)
+        : el("div", { class: "card empty" }, c.total ? `✅ На сегодня всё повторено!${c.next_due ? ` Следующее повторение — ${nice(c.next_due)}.` : ""}`
+          : "Здесь будут карточки: термины, даты, формулы. Выбери тему — я составлю набор."),
+      el("div", { class: "section" }, el("button", { class: "btn secondary", onclick: () => newDeckSheet(c.subjects) }, "➕ Новый набор")),
+      c.decks.length ? el("div", { class: "section" }, el("div", { class: "section-head" }, el("h2", {}, "Мои наборы")),
+        el("div", { class: "picker" }, c.decks.map((t) => el("span", { class: "chip" }, t)))) : null,
+      el("p", { class: "muted", style: "margin:16px 4px 0;font-size:14px" }, "Вспомни ответ, переверни карточку и честно нажми «Помню» или «Не помню». Забытое вернётся скоро, выученное — через 1, 3, 7, 14 и 30 дней."),
+    );
+  }
+
+  function newDeckSheet(subjects) {
+    let close;
+    const body = el("div", {});
+    const pickSubject = () => body.replaceChildren(
+      el("p", { class: "muted", style: "margin:6px 0 12px" }, "По какому предмету?"),
+      el("div", { class: "picker" }, subjects.map((s) => el("button", { class: "chip", onclick: () => pickTopic(s) }, subjIcon(s.id)[0], " ", s.title))));
+    async function pickTopic(s) {
+      body.replaceChildren(el("p", { class: "muted" }, "Смотрю темы по программе…"));
+      let topics = [];
+      try { topics = (await api(`/api/cards/topics?subject_id=${encodeURIComponent(s.id)}`)).topics; } catch (e) { /* можно ввести свою */ }
+      const input = el("input", { class: "input", placeholder: "Или напиши свою тему", maxlength: "100" });
+      body.replaceChildren(
+        el("p", { class: "muted", style: "margin:6px 0 12px" }, `${s.title}: выбери тему`),
+        topics.length ? el("div", { class: "list" }, topics.map((t) => el("button", { class: "item", onclick: () => make(s, t) },
+          el("div", { class: "ico", style: tint(subjIcon(s.id)[1]) }, "🃏"),
+          el("div", { class: "body" }, el("div", { class: "title" }, t)), el("span", { class: "go" }, "›")))) : null,
+        el("div", { class: "btn-row" }, input, el("button", { class: "btn small", onclick: () => input.value.trim() && make(s, input.value.trim()) }, "Ок")));
+    }
+    async function make(s, topic) {
+      body.replaceChildren(el("div", { class: "loading", style: "padding-top:6px" }, el("div", { class: "zap-big" }, "🃏"),
+        el("h2", {}, "Составляю карточки…"), el("p", {}, topic)));
+      try {
+        const r = await api("/api/cards/new", { subject_id: s.id, topic });
+        close();
+        openCards(r.added ? `✅ Набор «${r.topic}»: ${r.added} новых карточек` : "Эти карточки у тебя уже есть");
+      } catch (e) { toast(e.message); pickTopic(s); }
+    }
+    close = sheet(el("h2", {}, "➕ Новый набор"), body);
+    pickSubject();
+  }
+
+  function cardsSession(due) {
+    const queue = due.slice();
+    const again = new Set();
+    let i = 0, right = 0, wrong = 0, reward = "";
+    setBack(() => openCards());
+    const draw = () => {
+      if (i >= queue.length) return finish();
+      const c = queue[i];
+      const card = el("div", { class: "flip" },
+        el("div", { class: "flip-in" },
+          el("div", { class: "face front" }, el("div", { class: "topic" }, c.subject), el("div", { class: "q" }, c.front), el("div", { class: "hint" }, "Нажми, чтобы перевернуть")),
+          el("div", { class: "face back" }, el("div", { class: "topic" }, c.topic), el("div", { class: "q" }, c.back))));
+      const btns = el("div", { class: "btn-row", hidden: true },
+        el("button", { class: "btn secondary", onclick: () => grade(false) }, "❌ Не помню"),
+        el("button", { class: "btn", onclick: () => grade(true) }, "✅ Помню"));
+      card.addEventListener("click", () => { card.classList.add("flipped"); btns.hidden = false; });
+      page(el("div", { class: "quiz-top" },
+        el("div", { class: "bar" }, el("i", { style: `width:${pct(i, queue.length)}%;background:var(--violet)` })),
+        el("span", { class: "count" }, `${i + 1}/${queue.length}`)), card, btns);
+    };
+    async function grade(ok) {
+      const c = queue[i];
+      try {
+        const r = await api("/api/cards/grade", { id: c.id, remembered: ok });
+        if (r.reward) reward = r.reward;
+      } catch (e) { toast(e.message); }
+      if (ok) right += 1; else { wrong += 1; if (!again.has(c.id)) { again.add(c.id); queue.push(c); } }
+      i += 1;
+      draw();
+    }
+    function finish() {
+      if (right >= 5) confetti();
+      page(el("div", { class: "result" }, mascot(right >= wrong ? "cheer" : "wink", ""),
+        el("h2", { style: "font-size:26px;font-weight:900;margin-top:6px" }, "Тренировка готова!"),
+        el("p", { style: "margin-top:8px;font-weight:800" }, `Помню: ${right} · повторим ещё: ${wrong}`),
+        reward ? el("p", { class: "muted", style: "margin-top:8px;white-space:pre-line" }, reward) : null),
+        el("div", { class: "btn-row", style: "margin-top:20px" },
+          el("button", { class: "btn secondary", onclick: () => { S.quiz = null; refresh("games"); } }, "К играм"),
+          el("button", { class: "btn", onclick: () => openCards() }, "🃏 Карточки")));
+    }
+    draw();
+  }
+
   // ---------- демо-режим (открыто не из MAX) ----------
 
   const Demo = {
@@ -668,8 +1013,36 @@
           { subject: "Русский язык", subject_id: "rus", topic: "Безударные гласные", weak: false }],
         weak: [{ subject: "Математика", subject_id: "math", topic: "Обыкновенные дроби" }],
         today: { weekday: days[todayIdx], lessons: [{ id: "math", title: "Математика" }, { id: "rus", title: "Русский язык" }, { id: "eng", title: "Английский язык" }] },
+        games: {
+          lighthouse: { streak: 5, best: 8, freeze: true, today: false, at_risk: false, built: 4, stages: 9,
+            next: { days: 7, title: "огонь маяка", left: 2 } },
+          chest: { ready: !this.chestOpened, opened: !!this.chestOpened, left: 0, need: 3, collected: 7 + (this.chestOpened ? 1 : 0), total: 30, title: "Звездочёт" },
+          zap: { best: { math: 14, eng: 9 }, modes: [{ id: "math", title: "🔢 Счёт" }, { id: "eng", title: "🇬🇧 Слова" }] },
+          cards: { available: true, due: 4 },
+        },
       };
     },
+    chestOpened: false,
+    zapQuestion(mode) {
+      if (mode === "eng") {
+        const words = [["cat", "кошка"], ["dog", "собака"], ["house", "дом"], ["sun", "солнце"], ["book", "книга"], ["water", "вода"], ["friend", "друг"], ["school", "школа"]];
+        const pick = words.slice().sort(() => Math.random() - 0.5).slice(0, 4);
+        const options = pick.map((w) => w[1]).sort(() => Math.random() - 0.5);
+        return { text: `«${pick[0][0]}» — это…`, options, answer: options.indexOf(pick[0][1]) };
+      }
+      const a = 2 + Math.floor(Math.random() * 8), b = 2 + Math.floor(Math.random() * 8);
+      const right = a * b;
+      const set = new Set([right]);
+      while (set.size < 4) set.add(right + [1, -1, 2, -2, 10, -10, a, -b][Math.floor(Math.random() * 8)]);
+      const options = [...set].sort(() => Math.random() - 0.5).map(String);
+      return { text: `${a} × ${b} = ?`, options, answer: options.indexOf(String(right)) };
+    },
+    cardsBox: [
+      { id: "d1", front: "Сколько будет 3/4 от 20?", back: "15", subject: "Математика", topic: "Дроби" },
+      { id: "d2", front: "Что такое подлежащее?", back: "Главный член предложения: кто? или что?", subject: "Русский язык", topic: "Члены предложения" },
+      { id: "d3", front: "В каком году основан Петербург?", back: "1703", subject: "История", topic: "Пётр I" },
+      { id: "d4", front: "Формула площади прямоугольника", back: "S = a · b", subject: "Математика", topic: "Площадь" },
+    ],
     schedule: { "0": ["math", "rus", "eng"], "1": ["lit", "hist", "math"], "2": ["bio", "rus", "inf"] },
     async call(path, body) {
       await new Promise((r) => setTimeout(r, path.includes("train/start") ? 1200 : 150));
@@ -699,13 +1072,43 @@
           level_after: "повышенный", reward: `+${right * 20} ⚡ · всего ${640 + right * 20} ⚡` } : null };
       }
       if (path === "/api/chat") return { ok: true };
+      if (path === "/api/zap/start") {
+        this.zap = Array.from({ length: 40 }, () => this.zapQuestion(body.mode));
+        return { game: 1, mode: body.mode, title: body.mode === "eng" ? "🇬🇧 Слова" : "🔢 Счёт", seconds: 60, lives: 3, questions: this.zap, best: 14 };
+      }
+      if (path === "/api/zap/finish") {
+        let score = 0, wrong = 0;
+        for (let i = 0; i < body.answers.length && wrong < 3; i++) { if (body.answers[i] === this.zap[i].answer) score++; else wrong++; }
+        const rank = score >= 25 ? "Повелитель молний ⚡⚡⚡" : score >= 15 ? "Гроза задачника ⚡⚡" : score >= 8 ? "Быстрый разум ⚡" : "Разминка";
+        return { score, wrong, best: Math.max(14, score), new_record: score > 14, rank, reward: score >= 5 ? `+${Math.floor(score / 5) * 10} ⚡` : "" };
+      }
+      if (path === "/api/chest/open") {
+        this.chestOpened = true;
+        const prizes = [{ kind: "sticker", emoji: "🦊", name: "Лис-хитрец", rarity: "common", duplicate: false, points_text: "", collected: 8, total: 30 },
+          { kind: "sticker", emoji: "🐉", name: "Дракон знаний", rarity: "rare", duplicate: false, points_text: "", collected: 8, total: 30 },
+          { kind: "fact", emoji: "💡", name: "Осьминог может пробовать еду на вкус своими щупальцами.", rarity: "fact", points_text: "+50 ⚡", collected: 7, total: 30 },
+          { kind: "title", emoji: "🏅", name: "Хранитель огня", rarity: "title", points_text: "", collected: 7, total: 30 }];
+        return prizes[Math.floor(Math.random() * prizes.length)];
+      }
+      if (path === "/api/album") {
+        const all = [["🐱", "Котик-отличник", "common"], ["🐶", "Пёс-почемучка", "common"], ["🦊", "Лис-хитрец", "common"], ["🐻", "Мишка-соня", "common"],
+          ["🐼", "Панда-математик", "common"], ["🐨", "Коала-мечтатель", "common"], ["🐸", "Лягушка-путешественница", "common"], ["🐧", "Пингвин-капитан", "common"],
+          ["🦄", "Единорог", "rare"], ["🐉", "Дракон знаний", "rare"], ["🦖", "Ти-рекс", "rare"], ["🐳", "Кит-кругосветка", "rare"],
+          ["🚀", "Ракета «Пятёрка»", "legendary"], ["👑", "Корона знаний", "legendary"]];
+        return { stickers: all.map(([emoji, name, rarity], i) => ({ id: String(i), emoji, name, rarity, count: [1, 1, 2, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0][i] })),
+          titles: ["Звездочёт"], title: "Звездочёт", opened: 9 };
+      }
+      if (path === "/api/cards") return { due: this.cardsBox, due_total: 4, total: 12, learned: 5, next_due: null, decks: ["Дроби", "Пётр I"], subjects: this.state().subjects.map((s) => ({ id: s.id, title: s.title })) };
+      if (path.startsWith("/api/cards/topics")) return { topics: ["Обыкновенные дроби", "Сложение дробей", "Проценты"] };
+      if (path === "/api/cards/new") return { added: 8, topic: body.topic };
+      if (path === "/api/cards/grade") return { ok: true, reward: "" };
       throw new Error("Нет такого действия");
     },
   };
 
   // ---------- старт ----------
 
-  if (["home", "train", "progress", "schedule"].includes(START)) S.tab = START;
+  if (["home", "train", "games", "progress", "schedule"].includes(START)) S.tab = START;
   try { if (WA && WA.ready) WA.ready(); } catch (e) { /* необязательно */ }
   load();
 })();

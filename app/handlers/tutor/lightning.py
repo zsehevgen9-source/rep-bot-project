@@ -91,29 +91,38 @@ class LightningMixin:
             return
         await self._zap_finish(message, state, "⏹ Игра остановлена.")
 
-    async def _zap_finish(self, message: NormalizedMessage, state: Dict[str, Any], head: str) -> None:
-        uid = message.user_id
-        await self.redis.delete_state(f"zap_{uid}")
-        mode, score = state["mode"], state["score"]
+    async def _zap_record(self, uid: int, mode: str, score: int, grade: Optional[int]) -> Dict[str, Any]:
+        """Итог игры (общий для чата и мини-приложения): рекорд и очки наград."""
         best = await self._zap_best(uid)
         new_record = score > best.get(mode, 0)
         if new_record:
             best[mode] = score
             await self.redis.set_state(f"zap_best_{uid}", json.dumps(best))
-        grade = await self._get_grade(uid)
-        lines = [head, "", f"⚡ Результат: {score} {_answers_word(score)} · {zap_rules.rank(score)}"]
-        if new_record and score:
-            lines.append("🎉 Новый рекорд!")
-        elif best.get(mode):
-            lines.append(f"🏆 Рекорд: {best[mode]}")
+        points_text = ""
         points = zap_rules.points_for(score)
         if points:
             profile = await self._load_profile(uid)
             rewards = load_json(profile.get("rewards"), {})
             rewards["points"] = rewards.get("points", 0) + points
             await self._save_profile(uid, rewards=json.dumps(rewards, ensure_ascii=False))
-            mode_r = rewards_rules.mode_for_grade(grade)
-            lines.append(rewards_rules.gained_label(points, mode_r) or f"+{points} очков")
+            points_text = rewards_rules.gained_label(points, rewards_rules.mode_for_grade(grade)) or f"+{points} очков"
+        return {"best": best.get(mode, 0), "best_all": best, "new_record": new_record and score > 0,
+                "points_text": points_text, "rank": zap_rules.rank(score)}
+
+    async def _zap_finish(self, message: NormalizedMessage, state: Dict[str, Any], head: str) -> None:
+        uid = message.user_id
+        await self.redis.delete_state(f"zap_{uid}")
+        mode, score = state["mode"], state["score"]
+        grade = await self._get_grade(uid)
+        res = await self._zap_record(uid, mode, score, grade)
+        best, new_record = res["best_all"], res["new_record"]
+        lines = [head, "", f"⚡ Результат: {score} {_answers_word(score)} · {zap_rules.rank(score)}"]
+        if new_record and score:
+            lines.append("🎉 Новый рекорд!")
+        elif best.get(mode):
+            lines.append(f"🏆 Рекорд: {best[mode]}")
+        if res["points_text"]:
+            lines.append(res["points_text"])
         rows = [[_btn("⚡ Ещё раз", f"zap_go_{mode}")], [_back(f"subjects_{grade}" if grade else "back_to_menu")]]
         text = "\n".join(lines)
         name = await self.redis.get_state(f"name_{uid}") or "Ученик"

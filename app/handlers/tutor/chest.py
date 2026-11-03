@@ -49,10 +49,21 @@ class ChestMixin:
                                        f"{_tasks_word(st['left'])} — и он откроется!",
                               keyboard=_kb([[_btn("📅 Позаниматься", "today")], back]))
             return
+        prize = await self._chest_open(uid, grade, st["today"])
+        text, footer = prize["text"], prize["footer"]
+        rows = [[_btn("📒 Альбом", "album")], back]
+        sent = await self._send_card(message, cards.chest_card, prize["emoji"], prize["name"], prize["rarity"],
+                                     footer, text=text, keyboard=_kb(rows))
+        if not sent:
+            await self._quiet(message, text, keyboard=_kb(rows))
+
+    async def _chest_open(self, uid: int, grade: Optional[int], today: str) -> Dict[str, Any]:
+        """Открыть сундук (проверки «можно ли» — у вызывающего). Общая часть для чата и мини-приложения:
+        бросок, альбом, очки, текст. Возвращает награду с полями text, footer, points_text, collected, total."""
         album = await self._chest_album(uid)
         prize = chest_rules.roll(album)
         await self.redis.set_state(f"chest_{uid}", json.dumps(album, ensure_ascii=False))
-        await self.redis.set_state(f"chest_day_{uid}", st["today"], ex=2 * DAY)
+        await self.redis.set_state(f"chest_day_{uid}", today, ex=2 * DAY)
 
         mode = rewards_rules.mode_for_grade(grade)
         points_text = ""
@@ -87,11 +98,8 @@ class ChestMixin:
             text = f"🎁 Горсть бонусных очков: {points_text}!"
             footer = points_text
         text += "\n\nСледующий сундук — завтра."
-        rows = [[_btn("📒 Альбом", "album")], back]
-        sent = await self._send_card(message, cards.chest_card, prize["emoji"], prize["name"], prize["rarity"],
-                                     footer, text=text, keyboard=_kb(rows))
-        if not sent:
-            await self._quiet(message, text, keyboard=_kb(rows))
+        return {**prize, "text": text, "footer": footer, "points_text": points_text,
+                "collected": chest_rules.collected(album), "total": total}
 
     async def show_album(self, message: NormalizedMessage) -> None:
         uid = message.user_id
