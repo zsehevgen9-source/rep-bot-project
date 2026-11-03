@@ -184,6 +184,7 @@
     }
     if (S.data.role === "parent_view" && !["report", "progress", "schedule"].includes(S.tab)) S.tab = "report";
     render();
+    maybeGuide();
   }
 
   // ---------- новый пользователь ----------
@@ -208,6 +209,7 @@
         role("🎒", "Я ученик", "Уроки, задания, игры, прогресс", studentOnboarding),
         role("👨‍👩‍👧", "Я родитель", "Отчёты о занятиях ребёнка", parentOnboarding),
         role("👩‍🏫", "Я учитель", "Классы, задания, результаты", teacherOnboarding)),
+      el("div", { class: "section" }, el("button", { class: "btn secondary", onclick: () => openGuide("new") }, "❓ Как это работает")),
     );
   }
 
@@ -329,6 +331,7 @@
             ? [el("p", {}, `Ты в классе «${st.tclass.name}»`, st.tclass.teachers.length ? ` · ${st.tclass.teachers.join(", ")}` : ""),
               el("button", { class: "btn secondary", style: "margin-top:10px", onclick: leaveClass }, "🚪 Выйти из класса")]
             : joinForm())) : null,
+        el("div", { class: "section" }, el("button", { class: "btn secondary", onclick: () => openGuide() }, "❓ Как пользоваться приложением")),
         el("div", { class: "section" },
           el("div", { class: "section-head" }, el("h2", {}, "🔒 Данные")),
           el("div", { class: "btn-row" },
@@ -381,6 +384,171 @@
     draw();
   }
 
+  // ---------- ❓ гайд «Как пользоваться» ----------
+  // Листаемые подсказки для каждой роли. Открываются сами при первом входе и по кнопке «❓» в шапке.
+  // tab — какую вкладку внизу подсветить на картинке слайда.
+
+  function guideKind(d) {
+    if (!d) return "new";
+    if (d.role === "student") return "student";
+    if (d.role === "teacher") return "teacher";
+    if (d.role === "parent" || d.role === "parent_view") return "parent";
+    return "new";
+  }
+
+  function guideSlides(kind) {
+    const d = S.data || {};
+    if (kind === "student") {
+      return [
+        { mood: "cheer", title: "Привет! Я Маячок 👋", text: "Твой репетитор: помогаю закреплять уроки, делать домашку и готовиться к контрольным. Сейчас покажу, где что лежит.", points: ["Листай подсказки кнопкой «Дальше» или пальцем влево."] },
+        { tab: "home", ico: "🏠", title: "Главная", text: "Здесь твой день.", points: [
+          "«Сегодня» — уроки из расписания. Нажми урок — Маячок даст задания по этой теме.",
+          "«Пора повторить» — темы, которые пора освежить, чтобы не забылись.",
+          "«📅 Что сегодня» — план занятий на день, «📸 Домашка» — помощь с домашним заданием.",
+          "⚙️ вверху справа — настройки." ] },
+        { tab: "talk", ico: "💬", title: "Маячок — чат", text: "Пиши Маячку как другу: «объясни дроби», «проверь ответ», «не понял задачу».", points: [
+          "📷 — сфотографируй задачу или домашку, Маячок разберёт её.",
+          "🎤 — нажми, скажи ответ, нажми ■. Маячок поймёт голос.",
+          "🔊 у ответа — Маячок прочитает его вслух.",
+          "Кнопки под сообщениями Маячка нажимаются — так быстрее отвечать." ] },
+        { tab: "train", ico: "🎯", title: "Тренажёр", text: "Короткие тесты по любой теме.", points: [
+          "Выбери предмет → тему → отвечай на вопросы.",
+          "Ошибся — Маячок покажет правильный ответ и объяснит.",
+          "Цвет темы: 🟢 знаешь, 🟠 изучаешь, 🔴 стоит подтянуть." ] },
+        { tab: "games", ico: "🎮", title: "Игры и награды", text: "Учёба в виде игры — за занятия растут награды.", points: [
+          "🗼 Мой маяк — занимайся каждый школьный день, и маяк достраивается.",
+          "🎁 Сундук дня — реши 3 задания, и он откроется: наклейки, звания, факты.",
+          "⚡ Молния — 60 секунд, 3 жизни: успей ответить на как можно больше.",
+          (d.grade || 0) >= 5 ? "🃏 Карточки — запоминай термины, даты и формулы." : null ] },
+        { tab: "progress", ico: "📊", title: "Прогресс", text: "Как идут дела.", points: [
+          "Сколько решено за неделю и оценки за уроки.",
+          "Какие темы получаются, а какие стоит подтянуть.",
+          "Достижения, очки и уровень." ] },
+        { ico: "🗓", title: "Расписание", text: "Кнопка «🗓 Расписание» на главной.", points: [
+          "Внеси уроки по дням — один раз.",
+          "Тогда Маячок знает, что было сегодня, и предлагает закрепить именно это." ] },
+        { ico: "⚙️", title: "Настройки", text: "Кнопка ⚙️ на главной вверху справа.", points: [
+          "Имя, класс и голос Маячка (читать сразу, по кнопке или молчать).",
+          "Увлечения — Маячок объясняет темы через них: футбол, игры, музыку…",
+          "🔑 Код для родителя — чтобы мама или папа видели твои успехи.",
+          "🏫 Класс учителя — введи код, который дал учитель." ] },
+        { mood: "cheer", title: "Готово! 🚀", text: "Начни с главной или просто напиши Маячку в чат.", points: ["Подсказка всегда открывается снова кнопкой ❓ вверху."] },
+      ];
+    }
+    if (kind === "parent") {
+      return [
+        { mood: "wink", title: "Кабинет родителя 👋", text: "Здесь видно, как занимается ребёнок с Маячком. Покажу, что где.", points: ["Листайте кнопкой «Дальше» или пальцем влево."] },
+        { ico: "👨‍👩‍👧", title: "Дети", text: "Список подключённых детей.", points: [
+          "Нажмите на имя ребёнка — откроется его отчёт.",
+          "«➕ Ещё ребёнок» — подключить по коду. Код ребёнок берёт в «⚙️ Настройки → 🔑 Код для родителя».",
+          "«🔕 Отключиться» — перестать видеть данные ребёнка." ] },
+        { tab: "report", ico: "📋", title: "Отчёт", text: "Последние 7 дней.", points: [
+          "Сколько дней занимался и сколько заданий решил.",
+          "Процент ответов с первой попытки.",
+          "Оценки за уроки и темы, которые стоит подтянуть." ] },
+        { tab: "progress", ico: "📊", title: "Прогресс", text: "Подробно по неделе и предметам: что получается, что нет, достижения ребёнка.", points: [] },
+        { tab: "schedule", ico: "🗓", title: "Расписание", text: "Можно внести или поправить расписание уроков ребёнка.", points: [
+          "Маячок по расписанию предлагает ребёнку закрепить то, что было на уроках.",
+          "Стрелка «Назад» вверху вернёт к списку детей." ] },
+        { mood: "cheer", title: "Готово!", text: "Подсказка всегда открывается снова кнопкой ❓ вверху.", points: [] },
+      ];
+    }
+    if (kind === "teacher") {
+      return [
+        { mood: "wink", title: "Кабинет учителя 👋", text: "Классы, задания и результаты учеников — всё здесь. Покажу по шагам.", points: ["Листайте кнопкой «Дальше» или пальцем влево."] },
+        { ico: "⚙️", title: "1. Профиль", text: "Кнопка ⚙️ вверху справа.", points: [
+          "Начальные классы или предметник (и какие предметы).",
+          "Как к вам обращаться — это имя увидят ученики." ] },
+        { ico: "➕", title: "2. Класс", text: "«➕ Создать класс» — укажите класс и название.", points: [
+          "Маячок выдаст код класса — продиктуйте или напишите его ученикам.",
+          "Ученик вводит код в «⚙️ Настройки → 🏫 Класс учителя».",
+          "Класс уже создал коллега? «🔑 По коду» — подключитесь к нему, ученикам ничего делать не нужно." ] },
+        { ico: "👥", title: "3. Внутри класса", text: "Нажмите на класс — три вкладки:", points: [
+          "Ученики — активность за неделю, точность, оценки. Нажмите на ученика — подробный отчёт.",
+          "Задания — выданные задания и результаты.",
+          "Слабые — темы, которые плохо даются классу." ] },
+        { ico: "📝", title: "4. Задания", text: "Выберите предмет и тему — задание придёт каждому ученику в чат с Маячком.", points: [
+          "Маячок сам составит вопросы и поставит оценку.",
+          "В результатах видно, кто сделал, оценки и фото решений.",
+          "🔔 «Напомнить» — напоминание тем, кто ещё не сделал." ] },
+        { mood: "cheer", title: "Готово!", text: "Подсказка всегда открывается снова кнопкой ❓ вверху.", points: [] },
+      ];
+    }
+    return [
+      { mood: "cheer", title: "Это Маячок 👋", text: "ИИ-репетитор для школьников 1–11 классов.", points: [
+        "Ученику — объяснения, задания, помощь с домашкой, игры.",
+        "Родителю — отчёты об успехах ребёнка.",
+        "Учителю — классы, задания и результаты." ] },
+      { ico: "🎒", title: "Как начать", text: "Выберите, кто вы:", points: [
+        "Ученик: согласие → имя → класс. Готово!",
+        "Родитель: введите код из 6 цифр — его ребёнок берёт в «⚙️ Настройки → 🔑 Код для родителя».",
+        "Учитель: кабинет откроется сразу." ] },
+    ];
+  }
+
+  function guideSeen(kind) {
+    try { return localStorage.getItem("mayachok_guide_" + kind) === "1"; } catch (e) { return !!S["guide_" + kind]; }
+  }
+  function guideMark(kind) {
+    S["guide_" + kind] = true;
+    try { localStorage.setItem("mayachok_guide_" + kind, "1"); } catch (e) { /* без памяти — покажем ещё раз, не страшно */ }
+  }
+
+  function openGuide(kind) {
+    kind = kind || guideKind(S.data);
+    const slides = guideSlides(kind);
+    let i = 0;
+    const prevBack = S.back;
+    const box = el("div", { class: "guide", role: "dialog", "aria-label": "Как пользоваться" });
+    const close = () => { guideMark(kind); box.remove(); document.body.classList.remove("no-scroll"); setBack(prevBack); };
+    const step = (delta) => { const n = i + delta; if (n < 0) return; if (n >= slides.length) return close(); i = n; draw(); };
+    function miniTabs(active) {
+      const tabs = S.data ? tabsFor(S.data) : [];
+      if (!tabs.length || !tabs.some(([id]) => id === active)) return null;
+      return el("div", { class: "guide-tabs" }, tabs.map(([id, ico, name]) =>
+        el("span", { class: "guide-tab" + (id === active ? " on" : "") }, el("b", {}, ico), name)));
+    }
+    function draw() {
+      const s = slides[i];
+      const last = i === slides.length - 1;
+      box.replaceChildren(
+        el("div", { class: "guide-top" },
+          el("span", { class: "guide-count" }, `${i + 1} из ${slides.length}`),
+          last ? null : el("button", { class: "guide-skip", onclick: close }, "Пропустить")),
+        el("div", { class: "guide-body" },
+          s.ico ? el("div", { class: "guide-ico" }, s.ico) : mascot(s.mood || "happy", "guide-mascot"),
+          el("h2", {}, s.title),
+          s.text ? el("p", { class: "guide-text" }, s.text) : null,
+          (s.points || []).filter(Boolean).length ? el("ul", { class: "guide-points" }, s.points.filter(Boolean).map((p) => el("li", {}, p))) : null,
+          s.tab ? el("div", { class: "guide-where" }, el("div", { class: "label-s" }, "Где это: вкладка внизу экрана"), miniTabs(s.tab)) : null),
+        el("div", { class: "guide-dots" }, slides.map((_, n) => el("i", { class: n === i ? "on" : "" }))),
+        el("div", { class: "btn-row guide-nav" },
+          i > 0 ? el("button", { class: "btn secondary", onclick: () => step(-1) }, "← Назад") : null,
+          el("button", { class: "btn", onclick: () => step(1) }, last ? "Понятно! 🚀" : "Дальше →")));
+    }
+    let x0 = null;
+    box.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; }, { passive: true });
+    box.addEventListener("touchend", (e) => {
+      if (x0 === null) return;
+      const dx = e.changedTouches[0].clientX - x0; x0 = null;
+      if (Math.abs(dx) > 60) step(dx < 0 ? 1 : -1);
+    });
+    document.body.classList.add("no-scroll");
+    document.body.append(box);
+    setBack(() => (i > 0 ? step(-1) : close()));
+    draw();
+  }
+
+  function helpButton(solo) {
+    return el("button", { class: "help" + (solo ? " solo" : ""), "aria-label": "Как пользоваться", onclick: () => openGuide() }, "❓");
+  }
+
+  function maybeGuide() {
+    const kind = guideKind(S.data);
+    if (kind === "new" || guideSeen(kind) || document.querySelector(".guide")) return;
+    setTimeout(() => openGuide(kind), 700);
+  }
+
   // ---------- главная ----------
 
   function heroBlock(d, title, sub, mood) {
@@ -388,6 +556,7 @@
     if (d.level) chips.push(el("span", { class: "chip" }, `★ ${d.level}`));
     return el("div", { class: "hero" },
       d.role === "parent_view" ? null : el("button", { class: "gear", "aria-label": "Настройки", onclick: openSettings }, "⚙️"),
+      helpButton(d.role === "parent_view"),
       el("div", { class: "kicker" }, "Маячок · репетитор"),
       el("h1", {}, title),
       sub ? el("p", { class: "sub" }, sub) : null,
@@ -781,6 +950,7 @@
   function renderKids(d) {
     page(
       el("div", { class: "hero" },
+        helpButton(true),
         el("div", { class: "kicker" }, "Маячок · для родителей"),
         el("h1", {}, "Кабинет родителя"),
         el("p", { class: "sub" }, "Успехи ребёнка, оценки за уроки и расписание."),
@@ -1201,6 +1371,7 @@
     page(
       el("div", { class: "hero" },
         el("button", { class: "gear", "aria-label": "Профиль", onclick: () => teacherSetup(t) }, "⚙️"),
+        helpButton(),
         el("div", { class: "kicker" }, "Маячок · кабинет учителя"),
         el("h1", {}, t.profile.name),
         el("p", { class: "sub" }, t.profile.kind === "primary" ? "Начальные классы" : t.profile.subjects.map((x) => (t.subject_options.find((o) => o.id === x) || {}).title).join(", ")),
