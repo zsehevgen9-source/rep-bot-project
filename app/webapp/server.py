@@ -215,6 +215,12 @@ def create_app(api: MiniAppAPI, bot_token: str) -> web.Application:
             raise ApiError(404, "Фото не найдено — попросите ученика прислать ещё раз", "no_photo")
         return web.Response(body=image, content_type="image/jpeg", headers={"Cache-Control": "private, max-age=600"})
 
+    async def voice_say(request: web.Request) -> web.Response:
+        uid = user_id(request)
+        data = await body(request)
+        audio = await api.voice_say(uid, data.get("text"))
+        return web.Response(body=audio, content_type="audio/mpeg", headers={"Cache-Control": "private, max-age=3600"})
+
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="ok")
 
@@ -251,6 +257,8 @@ def create_app(api: MiniAppAPI, bot_token: str) -> web.Application:
     app.router.add_post("/api/talk", post(api.chat_send, "text", "payload"))
     app.router.add_post("/api/talk/photo", post(api.chat_photo, "image"))
     app.router.add_post("/api/talk/open", post(api.chat_open, "action", "params"))
+    app.router.add_post("/api/voice/say", voice_say)
+    app.router.add_post("/api/voice/listen", post(api.voice_listen, "audio"))
     app.router.add_post("/api/delete_me", post(api.delete_me))
     app.router.add_get("/api/teacher", teacher_home)
     app.router.add_post("/api/teacher/profile", post(api.teacher_profile, "kind", "subjects", "name"))

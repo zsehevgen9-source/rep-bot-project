@@ -165,6 +165,7 @@ class MiniAppAPI(AccountMixin, TeacherAPIMixin):
             "cards": {"available": grade >= 5, "due": await h.fc_due_count(uid) if grade >= 5 else 0},
         }
         return {
+            "voice": await h._voice_mode(uid),
             "games": games,
             "mode": mode,
             "mode_name": rewards_rules.MODE_NAMES[mode],

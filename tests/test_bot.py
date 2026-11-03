@@ -2653,7 +2653,26 @@ async def test_miniapp_account():
     assert any("Фото решения получил" in x["text"] for x in r["messages"]), [x["text"] for x in r["messages"]]
     det = await A.teacher_assignment(T3, c3, aid); assert det["students"][0]["photo"]
     assert await A.teacher_photo(T3, c3, aid, str(V)) == pic
-    print("   Мини-приложение целиком: знакомство, согласие, настройки, родитель по коду, кабинет учителя, чат с Маячком: OK")
+    # голос: озвучка ответа (MP3 для любого телефона), режим голоса в настройках, голосовой ответ ученика
+    cfg = await A.save_settings(V, {"voice": "off"}); assert cfg["voice"] == "off" and (await A.state(V))["voice"] == "off"
+    e = await fails(A.voice_say(V, "Привет!"), 409); assert e.code == "voice_off"
+    await A.save_settings(V, {"voice": "button"}); await fails(A.save_settings(V, {"voice": "loud"}))
+    await fails(A.voice_say(V, "🎉"))
+    FakeAI.voice = True
+    try:
+        try:
+            mp3 = await A.voice_say(V, "Привет, я Маячок!")
+            assert mp3[:3] == b"ID3" or mp3[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")
+        except ApiError as e:
+            assert e.code == "tts"                                   # нет ffmpeg на этой машине — честная ошибка
+    finally:
+        FakeAI.voice = False
+    FakeAI.heard = "а что такое дробь"
+    r = await A.voice_listen(V, _b64.b64encode(OGG_OPUS + b"\x00" * 1000).decode())
+    assert r["messages"][0]["text"] == "🎤 Я услышал: «а что такое дробь»" and r["messages"][-1]["text"] == "CHAT"
+    FakeAI.heard = ""
+    await fails(A.voice_listen(V, "data:audio/webm;base64,AAAA"))
+    print("   Мини-приложение целиком: знакомство, согласие, настройки, родитель по коду, кабинет учителя, чат и голос: OK")
 
 
 asyncio.run(main())

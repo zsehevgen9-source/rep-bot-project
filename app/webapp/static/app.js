@@ -300,6 +300,10 @@
             }, g)))] : null,
           st.timezone ? el("p", { class: "muted", style: "margin-top:12px;font-size:14px" }, `🕐 Время: ${st.timezone}`) : null),
         st.grade ? el("div", { class: "section" },
+          el("div", { class: "section-head" }, el("h2", {}, "🔊 Голос Маячка")),
+          el("div", { class: "segs", style: "margin-top:0" }, [["auto", "Сразу"], ["button", "По кнопке"], ["off", "Выключен"]].map(([id, title]) =>
+            el("button", { class: "seg" + (st.voice === id ? " active" : ""), onclick: () => save({ voice: id }, id === "off" ? "Голос выключен" : `Голос: ${title.toLowerCase()}`) }, title)))) : null,
+        st.grade ? el("div", { class: "section" },
           el("div", { class: "section-head" }, el("h2", {}, "🎯 Увлечения"), el("span", { class: "note" }, `до ${st.max_interests}`)),
           el("p", { class: "muted", style: "margin:0 4px 10px;font-size:14px" }, "Через них Маячок объясняет темы «по-другому»."),
           el("div", { class: "picker" }, st.interest_options.map((o) => el("button", {
@@ -340,7 +344,11 @@
         } }, "Вступить"))];
     }
     async function save(data, note) {
-      try { st = await api("/api/settings", data); if (note) toast(note); draw(); } catch (e) { toast(e.message); }
+      try {
+        st = await api("/api/settings", data);
+        if (S.data && st.voice) S.data.voice = st.voice;
+        if (note) toast(note); draw();
+      } catch (e) { toast(e.message); }
     }
     async function showCode() {
       try {
@@ -1402,6 +1410,7 @@
     page(list,
       el("div", { class: "talk-bar" },
         el("button", { class: "icon-btn", "aria-label": "Фото", onclick: () => file.click() }, "📷"),
+        el("button", { class: "icon-btn mic", id: "mic", "aria-label": "Сказать голосом", onclick: (ev) => toggleMic(ev.currentTarget) }, "🎤"),
         input, file,
         el("button", { class: "icon-btn send", "aria-label": "Отправить", onclick: send }, "➤")));
     drawTalk();
@@ -1419,7 +1428,10 @@
     const last = S.talk.length - 1;
     list.replaceChildren(...S.talk.map((m, i) => m.me
       ? el("div", { class: "bubble me" }, m.photo ? el("img", { class: "bubble-img", src: m.photo }) : m.text)
-      : el("div", { class: "bubble bot" }, m.text,
+      : el("div", { class: "bubble bot" },
+        m.text && S.data && S.data.voice && S.data.voice !== "off"
+          ? el("button", { class: "say", "aria-label": "Послушать", onclick: (ev) => speak(m.text, ev.currentTarget) }, "🔊") : null,
+        m.text,
         (m.images || []).map((src) => el("img", { class: "bubble-img", src })),
         m.buttons && m.buttons.length ? el("div", { class: "bubble-btns" + (i === last ? "" : " old") }, m.buttons.map((row) => el("div", { class: "bubble-row" },
           row.map((b) => el("button", {
@@ -1427,6 +1439,57 @@
           }, b.text))))) : null)),
       ...(waiting ? [el("div", { class: "bubble bot typing" }, el("i"), el("i"), el("i"))] : []));
     setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 30);
+  }
+
+
+  // ---- 🔊 голос Маячка и 🎤 голосовой ответ ----
+
+  let player = null, playing = "";
+  async function speak(text, button) {
+    if (player) { player.pause(); player = null; if (playing === text) { playing = ""; return; } }
+    if (DEMO) return toast("В демо-режиме голос не звучит — в MAX Маячок говорит голосом 🔊");
+    try {
+      if (button) button.classList.add("busy");
+      const response = await fetch(API_BASE + "/api/voice/say", {
+        method: "POST", headers: { "X-Init-Data": INIT, "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+      });
+      if (!response.ok) { let msg = "Не получилось озвучить"; try { msg = (await response.json()).error || msg; } catch (e) { /* звук */ } throw new Error(msg); }
+      const url = URL.createObjectURL(await response.blob());
+      player = new Audio(url);
+      playing = text;
+      player.onended = () => { URL.revokeObjectURL(url); player = null; playing = ""; };
+      await player.play();
+    } catch (e) { if (button) toast(e.message); }
+    finally { if (button) button.classList.remove("busy"); }
+  }
+
+  let recorder = null;
+  async function toggleMic(button) {
+    if (recorder) { recorder.stop(); return; }
+    if (DEMO) return toast("В демо-режиме микрофон не работает — в MAX можно отвечать голосом 🎤");
+    if (!navigator.mediaDevices || !window.MediaRecorder) return toast("Этот телефон не даёт приложению микрофон — напиши ответ или пришли голосовое в чат MAX", 4000);
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) {
+      return toast("Нет доступа к микрофону. Разреши его для MAX в настройках телефона.", 4000);
+    }
+    const chunks = [];
+    recorder = new MediaRecorder(stream);
+    const started = Date.now();
+    recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      button.classList.remove("rec"); button.textContent = "🎤";
+      recorder = null;
+      clearTimeout(toggleMic.limit);
+      if (Date.now() - started < 600) return toast("Нажми 🎤, скажи ответ и нажми ■");
+      const blob = new Blob(chunks, { type: chunks[0] ? chunks[0].type : "audio/webm" });
+      const data = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+      if (!S.talkBusy) talkRequest("/api/voice/listen", { audio: data }, { me: true, text: "🎤 голосовое" });
+    };
+    recorder.start();
+    button.classList.add("rec"); button.textContent = "■";
+    toggleMic.limit = setTimeout(() => recorder && recorder.stop(), 28000);   // SpeechKit распознаёт до 30 секунд
+    toast("Говори… нажми ■, когда закончишь", 2000);
   }
 
   function openLink(url) {
@@ -1441,6 +1504,8 @@
     try {
       const r = await api(path, body);
       S.talk.push(...(r.messages || []));
+      const first = (r.messages || []).find((m) => m.text && !m.text.startsWith("🎤"));
+      if (first && S.data && S.data.voice === "auto") setTimeout(() => speak(first.text), 300);
       if (!(r.messages || []).length) S.talk.push({ text: "👌" });
     } catch (e) {
       S.talk.push({ text: "⚠️ " + e.message });
@@ -1488,7 +1553,7 @@
       const days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
       const todayIdx = (new Date().getDay() + 6) % 7;
       return {
-        role: "student", bot_link: "", children: [], name: "Маша", grade: 5, mode: "coach", mode_name: "Тренер 💪",
+        role: "student", bot_link: "", children: [], name: "Маша", grade: 5, voice: "button", mode: "coach", mode_name: "Тренер 💪",
         points: 640, unit: "⚡", level: "Знаток", to_next: 360, streak: 4, week_goal: 15, week_done: 11,
         week: days.map((_, i) => {
           const day = days[(todayIdx + 1 + i) % 7];
@@ -1551,7 +1616,7 @@
       if (path === "/api/onboard/teacher") { this.role = "teacher"; return { teacher: true }; }
       if (path === "/api/privacy") return { text: "📄 Политика конфиденциальности бота «Маячок» (демо)." };
       if (path === "/api/settings") {
-        this.cfg = Object.assign(this.cfg || { name: "Маша", grade: 5, timezone: "Екатеринбург (МСК+2)", interests: ["foot"], max_interests: 3, parents: [{ id: 2, n: 1, since: "01.11.2026" }], tclass: null,
+        this.cfg = Object.assign(this.cfg || { name: "Маша", grade: 5, voice: "button", timezone: "Екатеринбург (МСК+2)", interests: ["foot"], max_interests: 3, parents: [{ id: 2, n: 1, since: "01.11.2026" }], tclass: null,
           interest_options: [["mine", "⛏ Майнкрафт"], ["foot", "⚽ Футбол"], ["anime", "🌸 Аниме"], ["space", "🚀 Космос"], ["games", "🎮 Игры"], ["food", "🍕 Еда"]].map(([id, title]) => ({ id, title })) }, body || {});
         return this.cfg;
       }

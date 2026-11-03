@@ -138,6 +138,7 @@ class AccountMixin:
                 "grade": grade,
                 "timezone": timezones.zone_name(profile["tz_offset"]) if profile.get("tz_offset") is not None else None,
                 "interests": await h._interests(uid),
+                "voice": await h._voice_mode(uid),
                 "interest_options": [{"id": k, "title": v[0]} for k, v in INTERESTS.items()],
                 "max_interests": MAX_INTERESTS,
                 "parents": [{"id": p["user_id"], "n": n, "since": p.get("since")} for n, p in enumerate(parents, 1)],
@@ -160,6 +161,11 @@ class AccountMixin:
                     raise ApiError(400, "Нет такого класса")
                 await h.redis.set_state(f"grade_{uid}", str(grade), ex=GRADE_TTL)
                 await h._save_profile(uid, grade=grade)
+            if "voice" in data:
+                code = {"auto": "1", "button": "b", "off": "0"}.get(data.get("voice"))
+                if not code:
+                    raise ApiError(400, "Неизвестный режим голоса")
+                await h.redis.set_state(f"voice_on_{uid}", code)
             if "interests" in data:
                 chosen = data.get("interests")
                 if not isinstance(chosen, list) or not all(k in INTERESTS for k in chosen):
@@ -289,6 +295,50 @@ class AccountMixin:
                 await h.show_subjects(message, grade)
             else:
                 raise ApiError(400, "Неизвестное действие")
+            return {"messages": self._messages(h)}
+
+    # ---------- 🔊 голос Маячка и 🎤 голосовой ответ ученика ----------
+
+    async def voice_say(self, uid: int, text: Any) -> Optional[bytes]:
+        """Озвучка ответа Маячка для приложения (MP3). Тем же голосом и с тем же кешем, что в чате MAX."""
+        from app.handlers.tutor.core import TTS_VOICE_KEY
+        from app.services.audio import to_mp3
+        from app.services.voice import prepare_for_speech
+        from app.webapp.api import ApiError
+        clean = prepare_for_speech(str(text or ""))[:1500]
+        if len(clean) < 2:
+            raise ApiError(400, "Нечего озвучивать")
+        async with self._handler() as h:
+            if await h._voice_mode(uid) == "off":
+                raise ApiError(409, "Голос выключен в настройках", "voice_off")
+            voice = load_json(await h.redis.get_state(TTS_VOICE_KEY), None)
+            audio = await h._speech(clean, voice)
+            mp3 = await to_mp3(audio) if audio else None
+            if not mp3:
+                raise ApiError(503, "Не получилось озвучить — попробуй ещё раз", "tts")
+            return mp3
+
+    async def voice_listen(self, uid: int, audio: Any) -> Dict[str, Any]:
+        """Голосовой ответ из приложения: распознаём (Yandex SpeechKit) и отвечаем, как на голосовое в чате."""
+        import base64
+        import secrets
+        from app.webapp.api import ApiError
+        data = str(audio or "")
+        if "," in data[:100]:
+            data = data.split(",", 1)[1]
+        try:
+            raw = base64.b64decode(data, validate=True)
+        except Exception:
+            raise ApiError(400, "Не получилось прочитать запись")
+        if not 500 < len(raw) <= 3 * 1024 * 1024:
+            raise ApiError(400, "Запись слишком короткая или слишком длинная")
+        key = secrets.token_hex(8)
+        async with self._handler() as h:
+            await h.redis.set_state(f"appimg_{key}", base64.b64encode(raw).decode(), ex=600)   # только на распознавание
+            message = self._quiet(h, uid)
+            message.audio_url = f"appimg:{key}"
+            await h.handle_message(message)
+            await h.redis.delete_state(f"appimg_{key}")
             return {"messages": self._messages(h)}
 
     async def privacy(self) -> Dict[str, Any]:
