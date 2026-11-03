@@ -1,0 +1,6 @@
+# HTTPS для мини-приложения: Caddy сам получает и продлевает сертификат Let's Encrypt
+# для адреса из MINIAPP_DOMAIN (например, 51-250-12-34.sslip.io) и передаёт запросы боту.
+{$MINIAPP_DOMAIN} {
+	encode gzip
+	reverse_proxy bot:8080
+}

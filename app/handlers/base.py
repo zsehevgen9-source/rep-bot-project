@@ -11,10 +11,16 @@ class BaseHandler:
         self.db = db
         self.redis = redis
 
-    async def answer(self, message: NormalizedMessage, text: str, keyboard: Optional[Dict[str, Any]] = None):
-        """Wraps api.send_message to reply to the current message's chat."""
-        return await self.api.send_message(
-            chat_id=message.chat_id,
-            text=text,
-            keyboard=keyboard
-        )
+    async def answer(
+        self,
+        message: NormalizedMessage,
+        text: str,
+        keyboard: Optional[Dict[str, Any]] = None,
+        attachments: Optional[list] = None,
+    ):
+        if attachments:
+            return await self.api.send_message(
+                user_id=message.user_id, text=text, keyboard=keyboard, attachments=attachments
+            )
+        return await self.api.send_message(user_id=message.user_id, text=text, keyboard=keyboard)
+        

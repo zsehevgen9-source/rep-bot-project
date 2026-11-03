@@ -1,33 +1,43 @@
-# Use Python 3.10 slim as base image
-FROM python:3.10-slim
+# ---------- Сборка зависимостей ----------
+FROM python:3.12-slim AS builder
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Set working directory
-WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libpq-dev \
-    && apt-get clean \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements if they exist (assuming user will add them to pyproject.toml or requirements.txt)
-# For now, we'll install the core dependencies directly to ensure the image builds
-RUN pip install --no-cache-dir \
-    aiohttp \
-    sqlalchemy[asyncio] \
-    asyncpg \
-    redis \
-    pydantic-settings \
-    pydantic
+WORKDIR /build
+COPY requirements.txt .
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install -r requirements.txt
 
-# Copy the rest of the application code
-COPY . .
+# ---------- Итоговый образ ----------
+FROM python:3.12-slim
 
-# Command to run the bot
-CMD ["python", "app/main.py"]
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PATH="/opt/venv/bin:$PATH"
+
+# Дополнительные корневые сертификаты (Минцифры и т.п.) из docker/certs/*.crt
+COPY docker/certs/ /usr/local/share/ca-certificates/extra/
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg fonts-dejavu-core fonts-noto-color-emoji \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+RUN useradd --create-home --uid 1000 bot
+
+WORKDIR /app
+COPY --from=builder /opt/venv /opt/venv
+COPY --chown=bot:bot app ./app
+COPY --chown=bot:bot alembic.ini ./
+COPY --chown=bot:bot data ./data
+
+USER bot
+
+EXPOSE 8080
+CMD ["python", "-m", "app.main"]

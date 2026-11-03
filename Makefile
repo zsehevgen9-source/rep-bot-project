@@ -1,22 +1,30 @@
-.PHONY: up down restart logs psql help
+.PHONY: help up down restart build logs logs-db psql migrate
 
-# Переменные окружения по умолчанию
-DB_USER ?= bot_user
+DB_USER ?= user
 DB_NAME ?= bot_db
 
-help: ## Показать этот help
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+help: ## Показать список команд
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "} {printf "  %-12s %s\n", $$1, $$2}'
 
-up: ## Поднять инфраструктуру локально (в фоне)
-	docker compose up -d
+up: ## Собрать и запустить всё в фоне
+	docker compose up -d --build
 
 down: ## Остановить и удалить контейнеры
 	docker compose down
 
-restart: down up ## Перезапустить окружение
+restart: down up ## Перезапустить
 
-logs: ## Посмотреть логи базы данных
-	docker compose logs -f postgres
+build: ## Пересобрать образ бота
+	docker compose build bot
 
-psql: ## Зайти в консоль PostgreSQL внутри контейнера
-	docker compose exec postgres psql -U $(DB_USER) -d $(DB_NAME)
+logs: ## Логи бота
+	docker compose logs -f bot
+
+logs-db: ## Логи PostgreSQL
+	docker compose logs -f db
+
+psql: ## Консоль PostgreSQL
+	docker compose exec db psql -U $(DB_USER) -d $(DB_NAME)
+
+migrate: ## Применить миграции Alembic
+	docker compose run --rm bot alembic upgrade head

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   bot:
     build:
@@ -12,40 +10,91 @@ services:
         condition: service_healthy
     env_file:
       - .env
+    ports:
+      # Мини-приложение: http://localhost:8080 (в интернет его выводит туннель Tuna — см. docs)
+      - "127.0.0.1:${WEBAPP_PORT:-8080}:${WEBAPP_PORT:-8080}"
+    volumes:
+      # Банк заданий: правьте data/tasks.json на компьютере, бот подхватит изменения без перезапуска
+      - ./data:/app/data:ro
     environment:
-      # Формируем URL внутри контейнера на лету из переменных
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-bot_db}
-      - REDIS_URL=redis://redis:6379/0
-    restart: always
+      # Внутри Docker-сети БД и Redis доступны по именам сервисов, а не по localhost
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-bot_db}
+      REDIS_URL: redis://redis:6379/0
+    restart: unless-stopped
 
   db:
     image: postgres:15-alpine
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
-      - POSTGRES_DB=${POSTGRES_DB:-bot_db}
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-bot_db}
     ports:
-      - "5432:5432" # Открываем порт для DataGrip / DBeaver
+      - "127.0.0.1:5432:5432" # для DataGrip / DBeaver, только с этого компьютера
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./docker/postgres_init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-bot_db}"]
       interval: 5s
       timeout: 5s
       retries: 5
-    restart: always
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
+    # Сохранение на диск: незаконченная диагностика и состояние переживут перезапуск
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
     ports:
-      - "6379:6379" # Открываем порт для RedisInsight
+      - "127.0.0.1:6379:6379" # для RedisInsight, только с этого компьютера
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
-    restart: always
+    restart: unless-stopped
+
+  db-backup:
+    # Раз в сутки сохраняет копию базы в папку backups (хранит 14 последних)
+    image: postgres:15-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_DB: ${POSTGRES_DB:-bot_db}
+    volumes:
+      - ./backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          pg_dump -h db -U "$$POSTGRES_USER" "$$POSTGRES_DB" > "/backups/bot_$$(date +%F).sql" && echo "Копия базы сохранена"
+          find /backups -name 'bot_*.sql' -mtime +14 -delete
+          sleep 86400
+        done
+    restart: unless-stopped
+
+  caddy:
+    # HTTPS для мини-приложения на сервере (включается строкой COMPOSE_PROFILES=https в .env — см. docs/SERVER.md)
+    image: caddy:2-alpine
+    profiles: ["https"]
+    depends_on:
+      - bot
+    environment:
+      MINIAPP_DOMAIN: ${MINIAPP_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:

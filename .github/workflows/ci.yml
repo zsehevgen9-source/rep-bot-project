@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Pillow для картинок
+        run: pip install Pillow==11.3.0
+
+      - name: Синтаксис Python
+        run: python -m compileall -q app
+
+      - name: Проверка сценариев бота
+        run: python tests/test_bot.py
+
+      - name: Сборка Docker-образа
+        run: docker build -f docker/bot.Dockerfile -t max-bot:ci .

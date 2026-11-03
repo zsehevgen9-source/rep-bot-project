@@ -12,11 +12,15 @@ class Recipient(BaseModel):
 
 
 class NormalizedMessage(BaseModel):
-    chat_id: int
-    user_id: int
-    message_id: int
+    chat_id: Optional[int] = None
+    user_id: Optional[int] = None
+    message_id: str
     text: Optional[str] = None
     payload: Optional[str] = None  # For callback data
+    audio_url: Optional[str] = None
+    file_url: Optional[str] = None    # фото или документ (например, расписание уроков)
+    file_name: Optional[str] = None
+    file_kind: Optional[str] = None   # "image" или "document"
 
     @property
     def is_callback(self) -> bool:

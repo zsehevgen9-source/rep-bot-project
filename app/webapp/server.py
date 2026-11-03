@@ -1,0 +1,154 @@
+"""Веб-сервер мини-приложения: отдаёт страницу (static/) и API (/api/...).
+
+Запускается вместе с ботом (app/main.py) на порту WEBAPP_PORT (по умолчанию 8080).
+Чтобы MAX мог открыть приложение, этот порт выводится в интернет по https — например, туннелем Tuna.
+
+Каждый запрос к /api/ несёт заголовок X-Init-Data — данные запуска, подписанные MAX.
+Сервер проверяет подпись токеном бота и только так узнаёт, кто открыл приложение.
+"""
+import asyncio
+import io
+import json
+import logging
+import os
+from typing import Any, Dict, Optional
+
+from aiohttp import web
+
+from app.webapp.api import ApiError, MiniAppAPI
+from app.webapp.auth import validate_init_data
+
+logger = logging.getLogger(__name__)
+STATIC = os.path.join(os.path.dirname(__file__), "static")
+MOODS = ("happy", "cheer", "wink")
+
+
+def _json(data: Any, status: int = 200) -> web.Response:
+    return web.json_response(data, status=status, dumps=lambda d: json.dumps(d, ensure_ascii=False))
+
+
+def _png(image) -> bytes:
+    buf = io.BytesIO()
+    image.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
+def create_app(api: MiniAppAPI, bot_token: str) -> web.Application:
+    images: Dict[str, bytes] = {}
+
+    def user_id(request: web.Request) -> int:
+        data = validate_init_data(request.headers.get("X-Init-Data", ""), bot_token)
+        if not data:
+            raise ApiError(401, "Открой приложение из MAX", "auth")
+        return data["user"]["id"]
+
+    def child_of(value: Any) -> Optional[int]:
+        try:
+            return int(value) if value not in (None, "") else None
+        except (TypeError, ValueError):
+            raise ApiError(400, "Неверный номер ученика")
+
+    async def body(request: web.Request) -> Dict[str, Any]:
+        try:
+            data = await request.json()
+        except Exception:
+            raise ApiError(400, "Неверный запрос")
+        if not isinstance(data, dict):
+            raise ApiError(400, "Неверный запрос")
+        return data
+
+    @web.middleware
+    async def errors(request: web.Request, handler):
+        try:
+            response = await handler(request)
+        except ApiError as e:
+            response = _json({"error": e.message, "code": e.code}, status=e.status)
+        except web.HTTPException:
+            raise
+        except Exception:
+            logger.exception("Мини-приложение: ошибка в %s", request.path)
+            response = _json({"error": "Что-то пошло не так. Попробуй ещё раз."}, status=500)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        if request.path.startswith("/api/"):
+            # Страница может лежать на другом сайте (например, GitHub Pages) — разрешаем ей обращаться к API.
+            # Это безопасно: куки не используются, а пользователя подтверждает подпись MAX в X-Init-Data.
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Headers"] = "X-Init-Data, Content-Type"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        if request.path == "/" or request.path.endswith(".html"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+    async def preflight(request: web.Request) -> web.Response:
+        return web.Response(status=204)
+
+    async def index(request: web.Request) -> web.StreamResponse:
+        return web.FileResponse(os.path.join(STATIC, "index.html"))
+
+    async def picture(request: web.Request) -> web.Response:
+        """Картинки Маячка рисуются кодом при первом запросе и дальше берутся из памяти."""
+        name = request.match_info["name"]
+        if name not in images:
+            from app.services.mascot import avatar, mascot
+            if name == "avatar":
+                image = await asyncio.to_thread(avatar, 256)
+            elif name in MOODS:
+                image = await asyncio.to_thread(mascot, 360, name)
+            else:
+                raise web.HTTPNotFound()
+            images[name] = _png(image)
+        return web.Response(body=images[name], content_type="image/png",
+                            headers={"Cache-Control": "public, max-age=86400"})
+
+    async def state(request: web.Request) -> web.Response:
+        return _json(await api.state(user_id(request), child_of(request.query.get("child"))))
+
+    async def schedule_get(request: web.Request) -> web.Response:
+        return _json(await api.schedule(user_id(request), child_of(request.query.get("child"))))
+
+    async def schedule_post(request: web.Request) -> web.Response:
+        uid = user_id(request)
+        data = await body(request)
+        return _json(await api.save_schedule(uid, data.get("schedule"), child_of(data.get("child"))))
+
+    async def train_start(request: web.Request) -> web.Response:
+        uid = user_id(request)
+        data = await body(request)
+        return _json(await api.train_start(uid, str(data.get("subject_id") or ""), data.get("topic")))
+
+    async def train_answer(request: web.Request) -> web.Response:
+        uid = user_id(request)
+        data = await body(request)
+        if not isinstance(data.get("index"), int) or not isinstance(data.get("choice"), str):
+            raise ApiError(400, "Неверный запрос")
+        return _json(await api.train_answer(uid, data["index"], data["choice"]))
+
+    async def chat(request: web.Request) -> web.Response:
+        uid = user_id(request)
+        data = await body(request)
+        return _json(await api.chat_action(uid, str(data.get("action") or ""), data))
+
+    async def health(request: web.Request) -> web.Response:
+        return web.Response(text="ok")
+
+    app = web.Application(middlewares=[errors], client_max_size=256 * 1024)
+    app.router.add_get("/", index)
+    app.router.add_get("/healthz", health)
+    app.router.add_get("/img/{name}.png", picture)
+    app.router.add_get("/api/state", state)
+    app.router.add_get("/api/schedule", schedule_get)
+    app.router.add_post("/api/schedule", schedule_post)
+    app.router.add_post("/api/train/start", train_start)
+    app.router.add_post("/api/train/answer", train_answer)
+    app.router.add_post("/api/chat", chat)
+    app.router.add_route("OPTIONS", "/api/{tail:.*}", preflight)
+    app.router.add_static("/static/", STATIC)
+    return app
+
+
+async def start_webapp(api: MiniAppAPI, bot_token: str, port: int) -> web.AppRunner:
+    runner = web.AppRunner(create_app(api, bot_token), access_log=None)
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", port).start()
+    logger.info("Мини-приложение запущено: http://localhost:%s", port)
+    return runner
