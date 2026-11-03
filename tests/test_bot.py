@@ -2543,10 +2543,90 @@ async def test_miniapp_games():
     print("   Мини-приложение: маяк, сундук и альбом, Молния со счётом на сервере, карточки: OK")
 
 
+async def test_miniapp_account():
+    """Мини-приложение целиком: знакомство (ученик/родитель/учитель), согласие, настройки, кабинет учителя."""
+    from contextlib import asynccontextmanager
+    from app.webapp.api import ApiError, MiniAppAPI
+    @asynccontextmanager
+    async def session_factory():
+        yield db
+    A = MiniAppAPI(lambda session: UserHandler(api, session, redis), session_factory, "mayachok_bot")
+    async def fails(coro, status=400):
+        try: await coro; assert False, "ожидалась ошибка"
+        except ApiError as e: assert e.status == status, (e.status, e.message); return e
+    # 1) Ученик знакомится прямо в приложении: согласие, имя, класс, часовой пояс телефона
+    U = 9861
+    assert (await A.state(U))["role"] == "new"
+    assert "согласие" in (await A.onboarding_info())["consent_text"]
+    settings.CONSENT_REQUIRED = True
+    try:
+        e = await fails(A.onboard_student(U, "Оля", 7, 300, False)); assert e.code == "consent"
+        await fails(A.onboard_student(U, "", 7, 300, True)); await fails(A.onboard_student(U, "Оля", 13, 300, True))
+        n = len(api.sent)
+        assert (await A.onboard_student(U, "  Оля  ", 7, 300, True))["ok"] and len(api.sent) == n   # в чат ничего не пишем
+        assert await UserHandler(api, db, redis).has_consent(U)
+    finally:
+        settings.CONSENT_REQUIRED = False
+    st = await A.state(U); assert st["role"] == "student" and st["name"] == "Оля" and st["grade"] == 7
+    assert db.rows[U].tz_offset == 300
+    # 2) Настройки: имя, класс, увлечения
+    cfg = await A.settings(U); assert cfg["name"] == "Оля" and cfg["grade"] == 7 and cfg["interests"] == [] and cfg["parents"] == []
+    cfg = await A.save_settings(U, {"name": "Ольга", "grade": 8, "interests": ["foot", "space"]})
+    assert cfg["name"] == "Ольга" and cfg["grade"] == 8 and cfg["interests"] == ["foot", "space"]
+    await fails(A.save_settings(U, {"interests": ["chess"]})); await fails(A.save_settings(U, {"grade": 0}))
+    # 3) Родитель подключается кодом в приложении, ребёнок получает уведомление в чат
+    code = (await A.parent_code(U))["code"]; assert len(code) == 6
+    P = 9862
+    await fails(A.link_parent(P, "000000"))
+    n = len(api.sent)
+    r = await A.link_parent(P, code); assert r["children"] == [U]
+    assert any("подключился родитель" in m["text"] for m in api.sent[n:])
+    assert (await A.state(P))["role"] == "parent" and (await A.settings(U))["parents"][0]["id"] == P
+    cfg = await A.unlink_parent(U, P); assert cfg["parents"] == [] and (await A.state(P))["role"] == "new"
+    # 4) Учитель: запрос → кабинет сразу, профиль, класс, ученик вступает, задание, результаты, напоминание
+    T = 9863
+    r = await A.teacher_request(T); assert r["teacher"] and (await A.state(T))["role"] == "teacher"
+    home = await A.teacher_home(T); assert home["profile"]["kind"] is None and home["classes"] == []
+    await fails(A.teacher_profile(T, "subject", [], "Анна Петровна"))
+    home = await A.teacher_profile(T, "subject", ["math", "phys"], "Анна Петровна")
+    assert home["profile"]["name"] == "Анна Петровна" and 8 in home["grades"] and 3 not in home["grades"]
+    c = (await A.teacher_class_new(T, 8, "8Б"))["code"]
+    assert (await A.teacher_home(T))["classes"][0]["code"] == c
+    await fails(A.join_class(U, "ZZZZZZ"))
+    cfg = await A.join_class(U, c.lower()); assert cfg["tclass"]["name"] == "8Б" and "Анна Петровна" in cfg["tclass"]["teachers"]
+    cls = await A.teacher_class(T, c)
+    assert [s["name"] for s in cls["students"]] == ["Ольга"] and [s["id"] for s in cls["subjects"]] == ["math", "phys"]
+    await fails(A.teacher_assign(T, c, "rus", "Причастия"))
+    n = len(api.sent)
+    await A.teacher_assign(T, c, "math", "Квадратные уравнения")
+    assert any("Задание от учителя — Анна Петровна" in m["text"] for m in api.sent[n:])
+    a = (await A.teacher_class(T, c))["assignments"][0]; assert a["topic"] == "Квадратные уравнения" and a["done"] == 0
+    det = await A.teacher_assignment(T, c, a["id"]); assert det["students"][0]["done"] is False
+    assert "Напомнил" in (await A.teacher_remind(T, c, a["id"]))["note"]
+    assert "Ольга" in (await A.teacher_student(T, c, U))["report"]
+    await fails(A.teacher_student(T, c, 1), 404); await fails(A.teacher_class(9999, c), 404)
+    await fails(A.teacher_home(U), 403)
+    assert await A.teacher_photo(T, c, a["id"], U) is None
+    # другой учитель подключается к тому же классу по коду
+    T2 = 9864
+    await A.teacher_request(T2); await A.teacher_profile(T2, "subject", ["phys"], "Иван Ильич")
+    assert (await A.teacher_class_link(T2, c))["code"] == c
+    await fails(A.teacher_class_link(T2, "NOPE00"))
+    home2 = await A.teacher_class_remove(T2, c)
+    assert home2["classes"] == [] and (await A.teacher_class(T, c))["code"] == c          # класс остался у владельца
+    # 5) Ученик выходит из класса и удаляет данные
+    cfg = await A.leave_class(U); assert cfg["tclass"] is None
+    assert (await A.delete_me(U))["ok"] and (await A.state(U))["role"] == "new"
+    await A.teacher_class_remove(T, c); assert (await A.teacher_home(T))["classes"] == []
+    assert "Политика" in (await A.privacy())["text"]
+    print("   Мини-приложение целиком: знакомство, согласие, настройки, родитель по коду, кабинет учителя: OK")
+
+
 asyncio.run(main())
 asyncio.run(test_visual())
 asyncio.run(test_miniapp())
 asyncio.run(test_miniapp_games())
+asyncio.run(test_miniapp_account())
 asyncio.run(test_savings())
 asyncio.run(test_consent())
 asyncio.run(test_teacher())

@@ -167,6 +167,54 @@ def create_app(api: MiniAppAPI, bot_token: str) -> web.Application:
         data = await body(request)
         return _json(await api.cards_grade(uid, data.get("id"), data.get("remembered")))
 
+    # ---------- знакомство и настройки ----------
+
+    def post(method, *fields):
+        """POST-обработчик: user_id из подписи MAX + поля из JSON-тела → api.method(uid, *поля)."""
+        async def handler(request: web.Request) -> web.Response:
+            uid = user_id(request)
+            data = await body(request) if request.can_read_body else {}
+            return _json(await method(uid, *[data.get(f) for f in fields]))
+        return handler
+
+    async def onboarding(request: web.Request) -> web.Response:
+        return _json(await api.onboarding_info())
+
+    async def settings_get(request: web.Request) -> web.Response:
+        return _json(await api.settings(user_id(request)))
+
+    async def settings_post(request: web.Request) -> web.Response:
+        uid = user_id(request)
+        return _json(await api.save_settings(uid, await body(request)))
+
+    async def privacy(request: web.Request) -> web.Response:
+        return _json(await api.privacy())
+
+    # ---------- кабинет учителя ----------
+
+    def query_int(request: web.Request, name: str) -> Optional[int]:
+        value = request.query.get(name, "")
+        return int(value) if value.lstrip("-").isdigit() else None
+
+    async def teacher_home(request: web.Request) -> web.Response:
+        return _json(await api.teacher_home(user_id(request)))
+
+    async def teacher_class(request: web.Request) -> web.Response:
+        return _json(await api.teacher_class(user_id(request), request.query.get("code")))
+
+    async def teacher_student(request: web.Request) -> web.Response:
+        return _json(await api.teacher_student(user_id(request), request.query.get("code"), query_int(request, "student")))
+
+    async def teacher_assignment(request: web.Request) -> web.Response:
+        return _json(await api.teacher_assignment(user_id(request), request.query.get("code"), request.query.get("aid")))
+
+    async def teacher_photo(request: web.Request) -> web.Response:
+        image = await api.teacher_photo(user_id(request), request.query.get("code"), request.query.get("aid"),
+                                        request.query.get("student"))
+        if not image:
+            raise ApiError(404, "Фото не найдено — попросите ученика прислать ещё раз", "no_photo")
+        return web.Response(body=image, content_type="image/jpeg", headers={"Cache-Control": "private, max-age=600"})
+
     async def health(request: web.Request) -> web.Response:
         return web.Response(text="ok")
 
@@ -188,6 +236,30 @@ def create_app(api: MiniAppAPI, bot_token: str) -> web.Application:
     app.router.add_get("/api/cards/topics", cards_topics)
     app.router.add_post("/api/cards/new", cards_new)
     app.router.add_post("/api/cards/grade", cards_grade)
+    app.router.add_get("/api/onboarding", onboarding)
+    app.router.add_post("/api/onboard/student", post(api.onboard_student, "name", "grade", "tz_offset", "consent"))
+    app.router.add_post("/api/onboard/parent", post(api.link_parent, "code"))
+    app.router.add_post("/api/onboard/teacher", post(api.teacher_request))
+    app.router.add_get("/api/settings", settings_get)
+    app.router.add_post("/api/settings", settings_post)
+    app.router.add_post("/api/parent/code", post(api.parent_code))
+    app.router.add_post("/api/parent/unlink", post(api.unlink_parent, "parent_id"))
+    app.router.add_post("/api/parent/leave", post(api.leave_child, "child"))
+    app.router.add_post("/api/class/join", post(api.join_class, "code"))
+    app.router.add_post("/api/class/leave", post(api.leave_class))
+    app.router.add_get("/api/privacy", privacy)
+    app.router.add_post("/api/delete_me", post(api.delete_me))
+    app.router.add_get("/api/teacher", teacher_home)
+    app.router.add_post("/api/teacher/profile", post(api.teacher_profile, "kind", "subjects", "name"))
+    app.router.add_post("/api/teacher/class/new", post(api.teacher_class_new, "grade", "name"))
+    app.router.add_post("/api/teacher/class/link", post(api.teacher_class_link, "code"))
+    app.router.add_post("/api/teacher/class/remove", post(api.teacher_class_remove, "code"))
+    app.router.add_get("/api/teacher/class", teacher_class)
+    app.router.add_get("/api/teacher/student", teacher_student)
+    app.router.add_post("/api/teacher/assign", post(api.teacher_assign, "code", "subject_id", "topic"))
+    app.router.add_get("/api/teacher/assignment", teacher_assignment)
+    app.router.add_post("/api/teacher/remind", post(api.teacher_remind, "code", "aid"))
+    app.router.add_get("/api/teacher/photo", teacher_photo)
     app.router.add_route("OPTIONS", "/api/{tail:.*}", preflight)
     app.router.add_static("/static/", STATIC)
     return app

@@ -153,7 +153,7 @@
   function page(...children) {
     const top = DEMO ? [el("div", { class: "demo-banner" }, window.MAYACHOK_DEMO
       ? "👀 Демо-версия: данные выдуманные — так приложение выглядит у ученика."
-      : "👀 Демо-режим: так приложение выглядит у ученика. Настоящие данные — когда откроете его из MAX.")] : [];
+      : "👀 Демо-режим: данные выдуманные. Настоящие — когда откроете приложение из MAX.")] : [];
     $app.replaceChildren(...top, ...children);
   }
 
@@ -161,6 +161,7 @@
     const d = S.data;
     renderTabs();
     if (d.role === "new") return renderNew(d);
+    if (d.role === "teacher") return renderTeacher(d);
     if (d.role === "parent") return renderKids(d);
     const screens = {
       home: renderHome, train: renderTrain, games: renderGames, progress: renderProgress, schedule: renderSchedule,
@@ -183,15 +184,189 @@
 
   // ---------- новый пользователь ----------
 
-  function renderNew() {
+  function renderNew(d) {
+    if (d && d.teacher_pending) {
+      return page(el("div", { class: "hero" }, el("div", { class: "kicker" }, "Маячок · для учителей"),
+        el("h1", {}, "Запрос отправлен"),
+        el("p", { class: "sub" }, "Администратор бота откроет кабинет учителя — я сразу напишу в чат."), mascot("wink", "mascot big")),
+        el("div", { class: "section" }, el("button", { class: "btn secondary", onclick: load }, "🔄 Проверить")));
+    }
+    const role = (emoji, title, sub, onclick) => el("button", { class: "role", onclick },
+      el("span", { class: "role-ico" }, emoji), el("div", {}, el("div", { class: "role-title" }, title), el("div", { class: "role-sub" }, sub)),
+      el("span", { class: "go" }, "›"));
     page(
       el("div", { class: "hero" },
         el("div", { class: "kicker" }, "Маячок · репетитор"),
         el("h1", {}, "Привет!"),
-        el("p", { class: "sub" }, "Я Маячок. Давай сначала познакомимся в чате — выбери там свой класс."),
+        el("p", { class: "sub" }, "Я Маячок — освещаю дорогу в учёбе. Кто ты?"),
         mascot("cheer", "mascot big")),
-      el("div", { class: "section" }, el("button", { class: "btn", onclick: openChat }, "💬 Перейти в чат")),
+      el("div", { class: "section list" },
+        role("🎒", "Я ученик", "Уроки, задания, игры, прогресс", studentOnboarding),
+        role("👨‍👩‍👧", "Я родитель", "Отчёты о занятиях ребёнка", parentOnboarding),
+        role("👩‍🏫", "Я учитель", "Классы, задания, результаты", teacherOnboarding)),
     );
+  }
+
+  async function studentOnboarding() {
+    let info = { consent_text: "", grades: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] };
+    try { info = await api("/api/onboarding"); } catch (e) { /* покажем без текста */ }
+    const st = { name: "", grade: null, consent: false };
+    setBack(() => { setBack(null); render(); });
+    const stepConsent = () => page(
+      el("div", { class: "section-head", style: "margin-top:4px" }, el("h2", { style: "font-size:24px" }, "🔒 О твоих данных")),
+      el("div", { class: "card", style: "white-space:pre-line;font-size:15px" }, info.consent_text),
+      el("button", { class: "btn secondary", style: "margin-top:12px", onclick: showPrivacy }, "📄 Подробнее"),
+      el("div", { class: "section" }, el("button", { class: "btn", onclick: () => { st.consent = true; stepName(); } }, "✅ Согласен")));
+    const stepName = () => {
+      const input = el("input", { class: "input big", placeholder: "Например: Маша", maxlength: "64", value: st.name });
+      const next = () => { if (!input.value.trim()) return toast("Напиши имя 🙂"); st.name = input.value.trim(); stepGrade(); };
+      input.addEventListener("keydown", (e) => e.key === "Enter" && next());
+      page(el("div", { class: "section-head", style: "margin-top:4px" }, el("h2", { style: "font-size:24px" }, "Как тебя зовут?")),
+        input, el("div", { class: "section" }, el("button", { class: "btn", onclick: next }, "Дальше →")));
+      setTimeout(() => input.focus(), 50);
+    };
+    const stepGrade = () => page(
+      el("div", { class: "section-head", style: "margin-top:4px" }, el("h2", { style: "font-size:24px" }, `${st.name}, в каком ты классе?`)),
+      el("div", { class: "grades" }, info.grades.map((g) => el("button", { class: "grade", onclick: () => finish(g) }, g))));
+    async function finish(grade) {
+      page(el("div", { class: "loading" }, el("div", { class: "lighthouse" }, el("div", { class: "beam" }), mascot("happy", "")), el("h2", {}, "Зажигаю маяк…")));
+      try {
+        await api("/api/onboard/student", { name: st.name, grade, consent: st.consent, tz_offset: -new Date().getTimezoneOffset() });
+      } catch (e) { toast(e.message); return stepGrade(); }
+      setBack(null);
+      confetti();
+      S.tab = "home";
+      await load();
+      toast(`Приятно познакомиться, ${st.name}! 🎉`, 3000);
+    }
+    stepConsent();
+  }
+
+  function parentOnboarding() {
+    setBack(() => { setBack(null); render(); });
+    const input = el("input", { class: "input big", placeholder: "Код из 6 цифр", inputmode: "numeric", maxlength: "6" });
+    const go_ = async () => {
+      try { await api("/api/onboard/parent", { code: input.value }); } catch (e) { return toast(e.message, 3500); }
+      setBack(null); confetti(); await load();
+    };
+    page(
+      el("div", { class: "section-head", style: "margin-top:4px" }, el("h2", { style: "font-size:24px" }, "👨‍👩‍👧 Подключение родителя")),
+      el("p", { class: "muted", style: "margin:0 4px 12px" }, "Попросите ребёнка открыть «⚙️ Настройки → 👨‍👩‍👧 Родитель» (в приложении или в чате) и показать код."),
+      input,
+      el("p", { class: "muted", style: "margin:10px 4px 0;font-size:14px" }, "Подключаясь, вы как родитель соглашаетесь на обработку данных ребёнка для учёбы."),
+      el("button", { class: "btn secondary small", style: "margin-top:8px", onclick: showPrivacy }, "📄 Политика"),
+      el("div", { class: "section" }, el("button", { class: "btn", onclick: go_ }, "Подключиться")));
+  }
+
+  async function teacherOnboarding() {
+    page(el("div", { class: "empty" }, "Открываю кабинет…"));
+    try {
+      const r = await api("/api/onboard/teacher", {});
+      if (!r.teacher && r.note) toast(r.note, 4000);
+    } catch (e) { toast(e.message); }
+    await load();
+  }
+
+  async function showPrivacy() {
+    let text = "";
+    try { text = (await api("/api/privacy")).text; } catch (e) { text = e.message; }
+    sheet(el("div", { style: "white-space:pre-line;font-size:15px" }, text));
+  }
+
+  // ---------- настройки ----------
+
+  async function openSettings() {
+    S.quiz = { settings: true };
+    renderTabs();
+    setBack(() => { S.quiz = null; refresh(S.tab); });
+    page(el("div", { class: "empty" }, "Открываю настройки…"));
+    let st;
+    try { st = await api("/api/settings"); } catch (e) { S.quiz = null; toast(e.message); go(S.tab); return; }
+    const draw = () => {
+      const nameInput = el("input", { class: "input", value: st.name, maxlength: "64" });
+      page(
+        el("div", { class: "section-head", style: "margin-top:4px" }, el("h2", { style: "font-size:26px" }, "⚙️ Настройки")),
+        el("div", { class: "card" },
+          el("div", { class: "label-s" }, "Имя"),
+          el("div", { class: "btn-row", style: "margin-top:6px" }, nameInput,
+            el("button", { class: "btn small", onclick: () => save({ name: nameInput.value }, "Имя сохранено ✅") }, "Сохранить")),
+          st.grade ? [el("div", { class: "label-s", style: "margin-top:14px" }, "Класс"),
+            el("div", { class: "grades small" }, Array.from({ length: 11 }, (_, i) => i + 1).map((g) => el("button", {
+              class: "grade" + (g === st.grade ? " active" : ""), onclick: () => g !== st.grade && save({ grade: g }, `Теперь ${g} класс`),
+            }, g)))] : null,
+          st.timezone ? el("p", { class: "muted", style: "margin-top:12px;font-size:14px" }, `🕐 Время: ${st.timezone}`) : null),
+        st.grade ? el("div", { class: "section" },
+          el("div", { class: "section-head" }, el("h2", {}, "🎯 Увлечения"), el("span", { class: "note" }, `до ${st.max_interests}`)),
+          el("p", { class: "muted", style: "margin:0 4px 10px;font-size:14px" }, "Через них Маячок объясняет темы «по-другому»."),
+          el("div", { class: "picker" }, st.interest_options.map((o) => el("button", {
+            class: "chip" + (st.interests.includes(o.id) ? " gold" : ""),
+            onclick: () => {
+              const has = st.interests.includes(o.id);
+              if (!has && st.interests.length >= st.max_interests) return toast(`Можно выбрать до ${st.max_interests}`);
+              save({ interests: has ? st.interests.filter((x) => x !== o.id) : [...st.interests, o.id] });
+            },
+          }, o.title)))) : null,
+        st.grade ? el("div", { class: "section" },
+          el("div", { class: "section-head" }, el("h2", {}, "👨‍👩‍👧 Родители")),
+          el("div", { class: "card" },
+            st.parents.length ? el("div", { class: "list" }, st.parents.map((p) => el("div", { class: "item flat" },
+              el("div", { class: "body" }, el("div", { class: "title" }, `Родитель ${p.n}`), el("div", { class: "meta" }, p.since ? `подключён ${p.since}` : "")),
+              el("button", { class: "btn secondary small", onclick: () => unlinkParent(p) }, "Отключить"))))
+              : el("p", { class: "muted" }, "Пока никто не подключён."),
+            el("div", { id: "pcode" }),
+            el("button", { class: "btn secondary", style: "margin-top:10px", onclick: showCode }, "🔑 Код для родителя"))) : null,
+        st.grade ? el("div", { class: "section" },
+          el("div", { class: "section-head" }, el("h2", {}, "🏫 Класс учителя")),
+          el("div", { class: "card" }, st.tclass
+            ? [el("p", {}, `Ты в классе «${st.tclass.name}»`, st.tclass.teachers.length ? ` · ${st.tclass.teachers.join(", ")}` : ""),
+              el("button", { class: "btn secondary", style: "margin-top:10px", onclick: leaveClass }, "🚪 Выйти из класса")]
+            : joinForm())) : null,
+        el("div", { class: "section" },
+          el("div", { class: "section-head" }, el("h2", {}, "🔒 Данные")),
+          el("div", { class: "btn-row" },
+            el("button", { class: "btn secondary", onclick: showPrivacy }, "📄 Политика"),
+            el("button", { class: "btn secondary danger", onclick: askDelete }, "🗑 Удалить"))),
+      );
+    };
+    function joinForm() {
+      const input = el("input", { class: "input", placeholder: "Код класса", maxlength: "8" });
+      return [el("p", { class: "muted", style: "font-size:14px" }, "Учитель даёт код класса — введи его, и учитель сможет давать задания и видеть результаты."),
+        el("div", { class: "btn-row" }, input, el("button", { class: "btn small", onclick: async () => {
+          try { st = await api("/api/class/join", { code: input.value }); toast("✅ Ты в классе!"); draw(); } catch (e) { toast(e.message, 3500); }
+        } }, "Вступить"))];
+    }
+    async function save(data, note) {
+      try { st = await api("/api/settings", data); if (note) toast(note); draw(); } catch (e) { toast(e.message); }
+    }
+    async function showCode() {
+      try {
+        const r = await api("/api/parent/code", {});
+        document.getElementById("pcode").replaceChildren(el("div", { class: "code" }, r.code),
+          el("p", { class: "muted", style: "font-size:14px;text-align:center" }, "Покажи этот код маме или папе. Действует сутки."));
+      } catch (e) { toast(e.message); }
+    }
+    function unlinkParent(p) {
+      let close;
+      close = sheet(el("h2", {}, `Отключить родителя ${p.n}?`),
+        el("p", { class: "muted", style: "margin:6px 0 14px" }, "Он больше не будет видеть твои занятия."),
+        el("div", { class: "btn-row" }, el("button", { class: "btn secondary", onclick: () => close() }, "Отмена"),
+          el("button", { class: "btn", onclick: async () => { close(); try { st = await api("/api/parent/unlink", { parent_id: p.id }); draw(); } catch (e) { toast(e.message); } } }, "Отключить")));
+    }
+    async function leaveClass() {
+      try { st = await api("/api/class/leave", {}); toast("Ты вышел из класса"); draw(); } catch (e) { toast(e.message); }
+    }
+    function askDelete() {
+      let close;
+      close = sheet(el("h2", {}, "Удалить все данные?"),
+        el("p", { class: "muted", style: "margin:6px 0 14px" }, "Имя, класс, прогресс, награды, маяк — всё сотрётся, родители и класс отключатся. Отменить нельзя."),
+        el("div", { class: "btn-row" }, el("button", { class: "btn secondary", onclick: () => close() }, "Отмена"),
+          el("button", { class: "btn danger", onclick: async () => {
+            close();
+            try { await api("/api/delete_me", {}); } catch (e) { return toast(e.message); }
+            S.quiz = null; S.tab = "home"; setBack(null); toast("Данные удалены"); load();
+          } }, "Удалить")));
+    }
+    draw();
   }
 
   // ---------- главная ----------
@@ -200,6 +375,7 @@
     const chips = [el("span", { class: "chip" }, `${d.grade} класс`)];
     if (d.level) chips.push(el("span", { class: "chip" }, `★ ${d.level}`));
     return el("div", { class: "hero" },
+      d.role === "parent_view" ? null : el("button", { class: "gear", "aria-label": "Настройки", onclick: openSettings }, "⚙️"),
       el("div", { class: "kicker" }, "Маячок · репетитор"),
       el("h1", {}, title),
       sub ? el("p", { class: "sub" }, sub) : null,
@@ -601,6 +777,15 @@
         }, el("div", { class: "ico", style: tint("#7c3aed") }, "🎒"),
           el("div", { class: "body" }, el("div", { class: "title" }, c.name), el("div", { class: "meta" }, c.grade ? `${c.grade} класс` : "класс не выбран")),
           el("span", { class: "go" }, "›")))) : el("div", { class: "card empty" }, "Пока никто не подключён. Попросите ребёнка открыть в чате «⚙️ Настройки → 👨‍👩‍👧 Родитель» и прислать вам код.")),
+      el("div", { class: "section btn-row" },
+        el("button", { class: "btn secondary", onclick: parentOnboarding }, "➕ Ещё ребёнок"),
+        el("button", { class: "btn secondary", onclick: showPrivacy }, "📄 Политика")),
+      d.children.length && d.role !== "student" ? el("div", { class: "section" }, el("button", { class: "btn secondary danger", onclick: () => {
+        let close;
+        close = sheet(el("h2", {}, "Отключиться от ребёнка"), el("div", { class: "list", style: "margin-top:10px" }, d.children.map((c) => el("button", {
+          class: "item", onclick: async () => { close(); try { await api("/api/parent/leave", { child: c.id }); toast("Вы отключились"); load(); } catch (e) { toast(e.message); } },
+        }, el("div", { class: "body" }, el("div", { class: "title" }, c.name)), el("span", { class: "go" }, "✕")))));
+      } }, "🔕 Отключиться")) : null,
       S.child || d.role === "student" ? el("div", { class: "section" }, el("button", {
         class: "btn secondary", onclick: () => { S.child = null; S.tab = "home"; load(); },
       }, "← Мой профиль")) : null,
@@ -979,11 +1164,229 @@
     draw();
   }
 
+
+  // ---------- кабинет учителя ----------
+
+  async function apiImage(path) {
+    if (DEMO) return "img/happy.png";
+    const response = await fetch(API_BASE + path, { headers: { "X-Init-Data": INIT } });
+    if (!response.ok) {
+      let msg = "Фото не найдено";
+      try { msg = (await response.json()).error || msg; } catch (e) { /* картинка */ }
+      throw new Error(msg);
+    }
+    return URL.createObjectURL(await response.blob());
+  }
+
+  async function renderTeacher() {
+    page(el("div", { class: "empty" }, "Открываю кабинет учителя…"));
+    let t;
+    try { t = await api("/api/teacher"); } catch (e) { page(el("div", { class: "empty" }, e.message)); return; }
+    if (!t.profile.kind || !t.profile.name) return teacherSetup(t);
+    page(
+      el("div", { class: "hero" },
+        el("button", { class: "gear", "aria-label": "Профиль", onclick: () => teacherSetup(t) }, "⚙️"),
+        el("div", { class: "kicker" }, "Маячок · кабинет учителя"),
+        el("h1", {}, t.profile.name),
+        el("p", { class: "sub" }, t.profile.kind === "primary" ? "Начальные классы" : t.profile.subjects.map((x) => (t.subject_options.find((o) => o.id === x) || {}).title).join(", ")),
+        mascot("wink")),
+      el("div", { class: "section" },
+        el("div", { class: "section-head" }, el("h2", {}, "Мои классы"), el("span", { class: "note" }, t.classes.length ? `${t.classes.length}` : "")),
+        t.classes.length ? el("div", { class: "list" }, t.classes.map((c) => el("button", { class: "item", onclick: () => openClass(c.code) },
+          el("div", { class: "ico", style: tint("#4f46e5") }, c.grade),
+          el("div", { class: "body" }, el("div", { class: "title" }, c.name),
+            el("div", { class: "meta" }, `учеников: ${c.students} · заданий: ${c.assignments} · код ${c.code}`)),
+          el("span", { class: "go" }, "›"))))
+          : el("div", { class: "card empty" }, "Классов пока нет. Создайте класс — ученики вступят по коду." +
+            (t.profile.kind === "subject" ? " Предметники обычно ведут 3–4 класса — добавьте каждый." : ""))),
+      el("div", { class: "btn-row" },
+        el("button", { class: "btn", onclick: () => newClassSheet(t) }, "➕ Создать класс"),
+        el("button", { class: "btn secondary", onclick: linkClassSheet }, "🔑 По коду")),
+      el("p", { class: "muted", style: "margin:14px 4px 0;font-size:14px" }, "Если класс уже создал другой учитель (например, классный руководитель), подключитесь к нему по коду — ученикам не нужно вступать заново."),
+    );
+  }
+
+  function teacherSetup(t) {
+    const st = { kind: t.profile.kind, subjects: t.profile.subjects.slice(), name: t.profile.name };
+    setBack(t.profile.kind && t.profile.name ? () => { setBack(null); renderTeacher(); } : null);
+    const draw = () => {
+      const nameInput = el("input", { class: "input big", placeholder: "Например: Мария Ивановна", maxlength: "40", value: st.name });
+      nameInput.addEventListener("input", () => { st.name = nameInput.value; });
+      page(
+        el("div", { class: "section-head", style: "margin-top:4px" }, el("h2", { style: "font-size:24px" }, "👩‍🏫 Профиль учителя")),
+        el("div", { class: "label-s" }, "Какие классы вы ведёте?"),
+        el("div", { class: "btn-row" },
+          el("button", { class: "btn" + (st.kind === "primary" ? "" : " secondary"), onclick: () => { st.kind = "primary"; draw(); } }, "🧸 Начальные"),
+          el("button", { class: "btn" + (st.kind === "subject" ? "" : " secondary"), onclick: () => { st.kind = "subject"; draw(); } }, "📐 Предметник")),
+        st.kind === "subject" ? el("div", { class: "section" }, el("div", { class: "label-s" }, "Ваши предметы"),
+          el("div", { class: "picker", style: "margin-top:8px" }, t.subject_options.map((o) => el("button", {
+            class: "chip" + (st.subjects.includes(o.id) ? " gold" : ""),
+            onclick: () => { st.subjects = st.subjects.includes(o.id) ? st.subjects.filter((x) => x !== o.id) : [...st.subjects, o.id]; draw(); },
+          }, o.title)))) : null,
+        el("div", { class: "section" }, el("div", { class: "label-s" }, "Как к вам обращаться ученикам?"), nameInput),
+        el("div", { class: "section" }, el("button", { class: "btn", onclick: async () => {
+          try { await api("/api/teacher/profile", st); setBack(null); toast("Профиль сохранён ✅"); renderTeacher(); } catch (e) { toast(e.message); }
+        } }, "💾 Сохранить")));
+    };
+    draw();
+  }
+
+  function newClassSheet(t) {
+    let close, grade = null;
+    const name = el("input", { class: "input", placeholder: "Название, например 5А", maxlength: "20" });
+    const grades = el("div", { class: "grades small" });
+    const drawGrades = () => grades.replaceChildren(...t.grades.map((g) => el("button", {
+      class: "grade" + (g === grade ? " active" : ""), onclick: () => { grade = g; if (!name.value) name.value = `${g}А`; drawGrades(); },
+    }, g)));
+    drawGrades();
+    close = sheet(el("h2", {}, "➕ Новый класс"),
+      el("p", { class: "muted", style: "margin:6px 0 10px" }, "Для какого класса? Задания и программа будут по нему."), grades,
+      el("div", { class: "section" }, name),
+      el("div", { class: "section" }, el("button", { class: "btn", onclick: async () => {
+        if (!grade) return toast("Выберите класс");
+        try { const r = await api("/api/teacher/class/new", { grade, name: name.value || `${grade}А` }); close(); openClass(r.code, true); } catch (e) { toast(e.message); }
+      } }, "Создать")));
+  }
+
+  function linkClassSheet() {
+    let close;
+    const code = el("input", { class: "input big", placeholder: "Код класса", maxlength: "8" });
+    close = sheet(el("h2", {}, "🔑 Подключиться к классу"),
+      el("p", { class: "muted", style: "margin:6px 0 10px" }, "Код даёт учитель, который создал класс, или ученики этого класса."), code,
+      el("div", { class: "section" }, el("button", { class: "btn", onclick: async () => {
+        try { const r = await api("/api/teacher/class/link", { code: code.value }); close(); openClass(r.code); } catch (e) { toast(e.message, 3500); }
+      } }, "Подключиться")));
+  }
+
+  async function openClass(code, fresh, tab) {
+    S.quiz = { tclass: code };
+    renderTabs();
+    setBack(() => { S.quiz = null; setBack(null); renderTeacher(); });
+    page(el("div", { class: "empty" }, "Открываю класс…"));
+    let c;
+    try { c = await api(`/api/teacher/class?code=${encodeURIComponent(code)}`); } catch (e) { toast(e.message); S.quiz = null; renderTeacher(); return; }
+    let part = tab || (fresh ? "students" : "students");
+    const draw = () => {
+      const seg = (id, title) => el("button", { class: "seg" + (part === id ? " active" : ""), onclick: () => { part = id; draw(); } }, title);
+      let body;
+      if (part === "students") {
+        body = c.students.length ? el("div", { class: "list" }, c.students.map((s) => el("button", { class: "item", onclick: () => studentSheet(c, s) },
+          el("div", { class: "ico", style: tint(s.solved ? "#22c55e" : "#9ca3af") }, s.days),
+          el("div", { class: "body" }, el("div", { class: "title" }, s.name),
+            el("div", { class: "meta" }, `дней ${s.days}/7 · решено ${s.solved}` + (s.avg_mark ? ` · ср. ${s.avg_mark}` : "") + (s.weak ? ` · слабых тем ${s.weak}` : ""))),
+          el("span", { class: "go" }, "›"))))
+          : el("div", { class: "card empty" }, el("p", {}, "Учеников пока нет. Дайте им код класса:"), el("div", { class: "code" }, c.code),
+            el("p", { class: "muted", style: "font-size:14px" }, "Ученик вводит его в приложении («⚙️ → Класс учителя») или пишет боту /join " + c.code));
+      } else if (part === "tasks") {
+        body = [el("button", { class: "btn", onclick: () => assignSheet(c) }, "📝 Новое задание классу"),
+          c.assignments.length ? el("div", { class: "list", style: "margin-top:12px" }, c.assignments.map((a) => el("button", { class: "item", onclick: () => openAssignment(c, a.id) },
+            el("div", { class: "ico", style: tint("#7c3aed") }, a.id),
+            el("div", { class: "body" }, el("div", { class: "title" }, a.topic),
+              el("div", { class: "meta" }, `${a.subject} · выполнили ${a.done}/${c.students.length} · 📸 ${a.photos}` + (a.avg_mark ? ` · ср. ${a.avg_mark}` : ""))),
+            el("span", { class: "go" }, "›"))))
+            : el("p", { class: "muted", style: "margin-top:12px" }, "Заданий пока не было.")];
+      } else {
+        body = c.weak.length ? el("div", { class: "list" }, c.weak.map((w) => el("div", { class: "item" },
+          el("div", { class: "ico", style: tint("#ef4444") }, w.count),
+          el("div", { class: "body" }, el("div", { class: "title" }, w.topic), el("div", { class: "meta" }, `${w.subject} · у ${w.count} уч.`)),
+          el("button", { class: "btn small", onclick: () => assign(c, w.subject_id, w.topic) }, "📝"))))
+          : el("div", { class: "card empty" }, "Слабых тем пока нет — или ученики ещё не проходили тесты.");
+      }
+      page(
+        el("div", { class: "class-head" },
+          el("div", {}, el("h2", {}, c.name), el("div", { class: "muted" }, `${c.grade} класс · ${c.teachers.map((t) => t.name).join(", ")}`)),
+          el("button", { class: "code small", onclick: () => toast(`Код класса: ${c.code}`) }, c.code)),
+        el("div", { class: "stats" },
+          el("div", { class: "stat" }, el("div", { class: "label" }, "Учеников"), el("div", { class: "value", style: "color:var(--indigo)" }, c.students.length)),
+          el("div", { class: "stat" }, el("div", { class: "label" }, "Занимались"), el("div", { class: "value", style: "color:var(--teal)" }, c.week.active)),
+          el("div", { class: "stat" }, el("div", { class: "label" }, "Решено за 7 дн."), el("div", { class: "value", style: "color:var(--green)" }, c.week.solved))),
+        el("div", { class: "segs" }, seg("students", "👥 Ученики"), seg("tasks", "📝 Задания"), seg("weak", "🎯 Слабые")),
+        el("div", { class: "section", style: "margin-top:12px" }, body),
+        el("div", { class: "section" }, el("button", { class: "btn secondary danger", onclick: () => removeClass(c) }, c.owner ? "🗑 Удалить класс" : "🚪 Отключиться от класса")),
+      );
+    };
+    async function studentSheet(cls, s) {
+      let report = "Загружаю…";
+      try { report = (await api(`/api/teacher/student?code=${cls.code}&student=${s.id}`)).report; } catch (e) { report = e.message; }
+      sheet(el("h2", {}, s.name), el("div", { class: "card", style: "white-space:pre-line;margin-top:10px;font-size:15px" }, report));
+    }
+    async function assign(cls, sid, topic) {
+      try {
+        const r = await api("/api/teacher/assign", { code: cls.code, subject_id: sid, topic });
+        toast(r.note ? r.note.split("\n")[0] : "Задание отправлено ✅", 3500);
+        openClass(cls.code, false, "tasks");
+      } catch (e) { toast(e.message); }
+    }
+    function assignSheet(cls) {
+      let close;
+      const box = el("div", {});
+      const pick = (s) => {
+        const input = el("input", { class: "input", placeholder: "Или своя тема", maxlength: "100" });
+        box.replaceChildren(el("p", { class: "muted", style: "margin:6px 0 10px" }, `${s.title}: тема задания`),
+          s.now.length ? el("div", { class: "list" }, s.now.map((topic) => el("button", { class: "item", onclick: () => { close(); assign(cls, s.id, topic); } },
+            el("div", { class: "ico", style: tint(subjIcon(s.id)[1]) }, subjIcon(s.id)[0]),
+            el("div", { class: "body" }, el("div", { class: "title" }, topic), el("div", { class: "meta" }, "сейчас по программе")),
+            el("span", { class: "go" }, "›")))) : null,
+          el("div", { class: "btn-row" }, input, el("button", { class: "btn small", onclick: () => { if (input.value.trim()) { close(); assign(cls, s.id, input.value.trim()); } } }, "Ок")),
+          el("p", { class: "muted", style: "margin-top:10px;font-size:14px" }, "Ученики получат задание в чат: несколько вопросов без подсказок, оценка, потом фото решения."));
+      };
+      close = sheet(el("h2", {}, "📝 Задание классу " + cls.name), box);
+      if (cls.subjects.length === 1) pick(cls.subjects[0]);
+      else box.replaceChildren(el("p", { class: "muted", style: "margin:6px 0 10px" }, "Предмет:"),
+        el("div", { class: "picker" }, cls.subjects.map((s) => el("button", { class: "chip", onclick: () => pick(s) }, subjIcon(s.id)[0], " ", s.title))));
+    }
+    function removeClass(cls) {
+      let close;
+      close = sheet(el("h2", {}, cls.owner ? `Удалить класс «${cls.name}»?` : `Отключиться от «${cls.name}»?`),
+        el("p", { class: "muted", style: "margin:6px 0 14px" }, cls.owner ? "Ученики выйдут из класса, результаты заданий удалятся." : "Класс и ученики останутся у других учителей."),
+        el("div", { class: "btn-row" }, el("button", { class: "btn secondary", onclick: () => close() }, "Отмена"),
+          el("button", { class: "btn danger", onclick: async () => {
+            close();
+            try { await api("/api/teacher/class/remove", { code: cls.code }); } catch (e) { return toast(e.message); }
+            S.quiz = null; setBack(null); renderTeacher();
+          } }, cls.owner ? "Удалить" : "Отключиться")));
+    }
+    draw();
+  }
+
+  async function openAssignment(cls, aid) {
+    setBack(() => openClass(cls.code, false, "tasks"));
+    page(el("div", { class: "empty" }, "Загружаю результаты…"));
+    let a;
+    try { a = await api(`/api/teacher/assignment?code=${cls.code}&aid=${aid}`); } catch (e) { toast(e.message); return openClass(cls.code, false, "tasks"); }
+    const waiting = a.students.filter((s) => !s.done || !s.photo).length;
+    page(
+      el("div", { class: "section-head", style: "margin-top:4px" }, el("h2", { style: "font-size:22px" }, `Задание ${a.id}`), el("span", { class: "note" }, a.subject)),
+      el("div", { class: "card" }, el("b", {}, a.topic), el("p", { class: "muted", style: "font-size:14px;margin-top:4px" },
+        `Выполнили ${a.students.filter((s) => s.done).length} из ${a.students.length}`)),
+      el("div", { class: "section list" }, a.students.map((s) => el("div", { class: "item" },
+        s.done ? el("div", { class: `mark m${s.mark}` }, s.mark) : el("div", { class: "ico", style: tint("#9ca3af") }, "⏳"),
+        el("div", { class: "body" }, el("div", { class: "title" }, s.name),
+          el("div", { class: "meta" }, s.done ? `${s.right} из ${s.total} · ` + (s.photo ? (s.photo_checked ? "📸 фото есть" : "📸 фото (не распознано)") : "ждём фото") : "ещё не выполнил(а)")),
+        s.photo ? el("button", { class: "btn small", onclick: () => showPhoto(s) }, "📸") : null))),
+      waiting ? el("div", { class: "section" }, el("button", { class: "btn secondary", onclick: async () => {
+        try { toast((await api("/api/teacher/remind", { code: cls.code, aid: a.id })).note, 3000); } catch (e) { toast(e.message); }
+      } }, `🔔 Напомнить (${waiting})`)) : null,
+    );
+    async function showPhoto(s) {
+      const img = el("img", { class: "photo", alt: "Фото решения" });
+      const close = sheet(el("h2", {}, `📸 ${s.name}`), el("p", { class: "muted", style: "margin:4px 0 10px" }, `оценка ${s.mark} (${s.right} из ${s.total})`), img);
+      try { img.src = await apiImage(`/api/teacher/photo?code=${cls.code}&aid=${a.id}&student=${s.id}`); } catch (e) { close(); toast(e.message, 3500); }
+    }
+  }
+
   // ---------- демо-режим (открыто не из MAX) ----------
 
   const Demo = {
     test: null,
+    role: new URLSearchParams(location.search).get("demo") || "student",   // ?demo=new | teacher | parent — показать другие роли
     state() {
+      if (this.role === "new") return { role: "new", children: [], bot_link: "", teacher_pending: false };
+      if (this.role === "teacher") return { role: "teacher", children: [], bot_link: "" };
+      if (this.role === "parent") return { role: "parent", children: [{ id: 1, name: "Маша", grade: 5 }], bot_link: "" };
+      return this.studentState();
+    },
+    studentState() {
       const subj = [["Математика", "math", 8, 3, 2], ["Русский язык", "rus", 6, 4, 1], ["Литература", "lit", 3, 1, 0],
         ["История", "hist", 2, 2, 1], ["Биология", "bio", 4, 0, 0], ["География", "geo", 1, 1, 0],
         ["Английский язык", "eng", 5, 2, 0], ["Информатика", "inf", 2, 1, 0]];
@@ -1047,6 +1450,34 @@
     async call(path, body) {
       await new Promise((r) => setTimeout(r, path.includes("train/start") ? 1200 : 150));
       if (path.startsWith("/api/state")) return this.state();
+      if (path === "/api/onboarding") return { consent_text: "🔒 Прежде чем начать — о твоих данных.\n\nЯ сохраняю имя, класс и ответы — только для учёбы. Если тебе меньше 14 лет — согласие даёт родитель.", grades: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] };
+      if (path === "/api/onboard/student") { this.role = "student"; return { ok: true }; }
+      if (path === "/api/onboard/parent") { if (body.code !== "123456") throw new Error("Код не подошёл (в демо — 123456)"); this.role = "parent"; return { ok: true }; }
+      if (path === "/api/onboard/teacher") { this.role = "teacher"; return { teacher: true }; }
+      if (path === "/api/privacy") return { text: "📄 Политика конфиденциальности бота «Маячок» (демо)." };
+      if (path === "/api/settings") {
+        this.cfg = Object.assign(this.cfg || { name: "Маша", grade: 5, timezone: "Екатеринбург (МСК+2)", interests: ["foot"], max_interests: 3, parents: [{ id: 2, n: 1, since: "01.11.2026" }], tclass: null,
+          interest_options: [["mine", "⛏ Майнкрафт"], ["foot", "⚽ Футбол"], ["anime", "🌸 Аниме"], ["space", "🚀 Космос"], ["games", "🎮 Игры"], ["food", "🍕 Еда"]].map(([id, title]) => ({ id, title })) }, body || {});
+        return this.cfg;
+      }
+      if (path === "/api/parent/code") return { code: "123456" };
+      if (path === "/api/parent/unlink") { this.cfg.parents = []; return this.cfg; }
+      if (path === "/api/class/join") { this.cfg.tclass = { name: "5А", teachers: ["Анна Петровна"] }; return this.cfg; }
+      if (path === "/api/class/leave") { this.cfg.tclass = null; return this.cfg; }
+      if (path === "/api/delete_me") { this.role = "new"; return { ok: true }; }
+      if (path === "/api/teacher") return { profile: { kind: "subject", subjects: ["math"], name: "Анна Петровна" }, subject_options: [{ id: "math", title: "Математика" }, { id: "phys", title: "Физика" }],
+        grades: [5, 6, 7, 8, 9, 10, 11], classes: [{ code: "K7M2QX", name: "5А", grade: 5, students: 24, owner: true, assignments: 3 }, { code: "P9W4TR", name: "6Б", grade: 6, students: 22, owner: false, assignments: 1 }] };
+      if (path.startsWith("/api/teacher/class?")) return { code: "K7M2QX", name: "5А", grade: 5, owner: true, teachers: [{ name: "Анна Петровна", what: "Математика" }],
+        week: { active: 18, solved: 214 },
+        students: [["Маша", 6, 31, 4.6, 1], ["Даня", 4, 18, 4.0, 2], ["Ира", 7, 40, 4.8, 0], ["Тимур", 1, 3, null, 3]].map(([name, days, solved, avg_mark, weak], i) => ({ id: i + 1, name, days, solved, avg_mark, weak, streak: days })),
+        weak: [{ subject_id: "math", subject: "Математика", topic: "Сложение дробей", count: 7 }, { subject_id: "math", subject: "Математика", topic: "Проценты", count: 4 }],
+        subjects: [{ id: "math", title: "Математика", now: ["Обыкновенные дроби", "Сложение дробей"] }],
+        assignments: [{ id: "3", subject: "Математика", topic: "Сложение дробей", created: "2026-11-02", done: 19, photos: 15, avg_mark: 4.3 }] };
+      if (path.startsWith("/api/teacher/assignment")) return { id: "3", subject: "Математика", topic: "Сложение дробей",
+        students: [{ id: 1, name: "Маша", done: true, mark: 5, right: 5, total: 5, photo: true, photo_checked: true }, { id: 2, name: "Даня", done: true, mark: 3, right: 3, total: 5, photo: false }, { id: 4, name: "Тимур", done: false }] };
+      if (path.startsWith("/api/teacher/student")) return { report: "Маша, 5 класс\nЗанималась 6 дней из 7, решено 31 задание.\nОценки: 5, 5, 4.\nСтоит подтянуть: Сложение дробей." };
+      if (path.startsWith("/api/teacher/")) return { ok: true, code: "K7M2QX", note: "✅ Готово (демо)" };
+      if (path === "/api/parent/leave") { this.role = "new"; return { children: [] }; }
       if (path.startsWith("/api/schedule") && !body) {
         return { days: ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб"], schedule: JSON.parse(JSON.stringify(this.schedule)),
           subjects: this.state().subjects.map((s) => ({ id: s.id, title: s.title })) };

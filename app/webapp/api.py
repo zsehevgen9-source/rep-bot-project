@@ -27,6 +27,8 @@ from app.services import schedule as schedule_rules
 from app.services.levels import LEVEL_NAMES
 from app.services.programs import programs
 from app.services.task_utils import normalize_answer
+from app.webapp.api_account import AccountMixin
+from app.webapp.api_teacher import TeacherAPIMixin
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,7 @@ class ApiError(Exception):
         self.status, self.message, self.code = status, message, code
 
 
-class MiniAppAPI:
+class MiniAppAPI(AccountMixin, TeacherAPIMixin):
     """handler_factory(session) → UserHandler; session_factory() → async-контекст с сессией базы."""
 
     def __init__(self, handler_factory: Callable, session_factory: Callable, bot_username: str = ""):
@@ -78,8 +80,17 @@ class MiniAppAPI:
             grade = await h._get_grade(target)
             profile = await h._load_profile(target)
             name = profile.get("name") or await h.redis.get_state(f"name_{target}") or ""
+            if child is not None:
+                role = "parent_view"
+            elif grade:
+                role = "student"
+            elif await h._is_teacher(uid, explicit=True):
+                role = "teacher"
+            else:
+                role = "parent" if kids else "new"
             result: Dict[str, Any] = {
-                "role": "parent_view" if child is not None else ("student" if grade else ("parent" if kids else "new")),
+                "role": role,
+                "teacher_pending": bool(await h.redis.get_state(f"teacher_req_{uid}")),
                 "bot_link": self.bot_link(),
                 "children": kids,
                 "name": name,

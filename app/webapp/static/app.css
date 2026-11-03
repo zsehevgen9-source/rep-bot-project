@@ -389,6 +389,47 @@ h1, h2, h3, p { margin: 0; }
   color: var(--text); font: inherit;
 }
 
+
+/* ---------- знакомство, настройки, учитель ---------- */
+.role {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 16px; border-radius: var(--radius);
+  background: var(--card); box-shadow: var(--shadow); transition: transform .12s ease;
+}
+.role:active { transform: scale(.98); }
+.role-ico { font-size: 38px; flex: none; }
+.role > div { flex: 1; }
+.role-title { font-size: 19px; font-weight: 900; }
+.role-sub { color: var(--muted); font-size: 14px; }
+.role .go { color: var(--muted); font-size: 24px; }
+.gear {
+  position: absolute; top: 14px; right: 14px; z-index: 3; width: 40px; height: 40px; border-radius: 14px;
+  background: rgba(255, 255, 255, .2); color: #fff; font-size: 20px; display: grid; place-items: center;
+}
+.grades { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 8px; }
+.grades.small { grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.grade {
+  background: var(--card); box-shadow: var(--shadow); border-radius: 18px; padding: 16px 0; font-size: 22px; font-weight: 900;
+  border: 2px solid transparent;
+}
+.grades.small .grade { padding: 10px 0; font-size: 17px; border-radius: 14px; }
+.grade.active { background: var(--hero); color: #fff; }
+.input.big { width: 100%; font-size: 20px; padding: 16px; border-radius: 18px; }
+.label-s { font-weight: 800; color: var(--muted); font-size: 14px; margin: 0 2px 6px; }
+.code {
+  display: block; margin: 12px auto 6px; padding: 12px 20px; border-radius: 16px; background: var(--line);
+  font-family: ui-monospace, Menlo, monospace; font-size: 30px; font-weight: 900; letter-spacing: .18em; text-align: center; width: fit-content;
+}
+.code.small { margin: 0; font-size: 16px; padding: 8px 12px; letter-spacing: .1em; }
+.item.flat { box-shadow: none; padding: 8px 0; background: transparent; }
+.btn.danger { color: var(--red); }
+.btn.danger:not(.secondary) { background: var(--red); color: #fff; box-shadow: none; }
+.class-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-top: 4px; }
+.class-head h2 { font-size: 26px; font-weight: 900; }
+.segs { display: flex; gap: 6px; margin-top: 16px; background: var(--line); padding: 4px; border-radius: 16px; }
+.seg { flex: 1; padding: 10px 4px; border-radius: 12px; font-weight: 800; font-size: 14px; color: var(--muted); }
+.seg.active { background: var(--card); color: var(--indigo); box-shadow: var(--shadow); }
+.photo { width: 100%; border-radius: 18px; display: block; background: var(--line); min-height: 120px; }
+
 @media (max-width: 360px) {
   .hero h1 { font-size: 26px; }
   .stat .value { font-size: 20px; }
