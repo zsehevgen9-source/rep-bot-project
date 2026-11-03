@@ -7,11 +7,15 @@ cd "$(dirname "$0")/.."
 [ -f .env ] || { echo "Нет файла .env — сначала запустите бота (scripts/server_import.sh)"; exit 1; }
 DOMAIN="$1"
 if [ -z "$DOMAIN" ]; then
-  IP="$(curl -s -H Metadata-Flavor:Google http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip || true)"
-  [ -n "$IP" ] || IP="$(curl -s https://ifconfig.me)"
-  [ -n "$IP" ] || { echo "Не удалось узнать IP сервера — запустите так: bash scripts/server_https.sh <IP>.sslip.io"; exit 1; }
+  # IP сервера: сначала у Yandex Cloud, потом у внешних сервисов. Берём ответ, только если это действительно IPv4
+  is_ip() { echo "$1" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; }
+  IP="$(curl -fs --max-time 3 -H Metadata-Flavor:Google http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip 2>/dev/null || true)"
+  is_ip "$IP" || IP="$(curl -fs --max-time 5 https://ifconfig.me 2>/dev/null || true)"
+  is_ip "$IP" || IP="$(curl -fs --max-time 5 https://api.ipify.org 2>/dev/null || true)"
+  is_ip "$IP" || { echo "Не удалось узнать IP сервера — запустите так: bash scripts/server_https.sh 1-2-3-4.sslip.io (цифры вашего IP через дефис)"; exit 1; }
   DOMAIN="$(echo "$IP" | tr '.' '-').sslip.io"
 fi
+echo "$DOMAIN" | grep -Eq '^[A-Za-z0-9.-]+$' || { echo "Странный адрес: $DOMAIN"; exit 1; }
 set_env() {   # заменить строку KEY=… в .env или добавить её
   if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else echo "$1=$2" >> .env; fi
 }
