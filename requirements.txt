@@ -1,9 +1,12 @@
-aiohttp==3.13.3
-alembic==1.18.4
-asyncpg==0.31.0
-pydantic==2.12.5
-pydantic-settings==2.13.1
-redis==7.2.0
-SQLAlchemy[asyncio]==2.0.46
-sdamgia-api
-Pillow==11.3.0
+# Библиотеки Маячка (Python 3.12). Установка: pip install -r requirements.txt
+# В Docker-образ ставятся автоматически (см. Dockerfile). Системные программы образа: ffmpeg (голос), шрифты DejaVu и Noto Color Emoji.
+
+aiohttp==3.13.3              # запросы к MAX API, YandexGPT, SpeechKit, Vision; веб-сервер мини-приложения
+alembic==1.18.4              # миграции базы данных (создание и обновление таблиц)
+asyncpg==0.31.0              # асинхронный драйвер PostgreSQL
+pydantic==2.12.5             # проверка данных от MAX API
+pydantic-settings==2.13.1    # настройки из файла .env
+redis==7.2.0                 # клиент Redis: состояние диалогов, кеш, игры, карточки
+SQLAlchemy[asyncio]==2.0.46  # работа с PostgreSQL: профили, прогресс, расписание
+sdamgia-api                  # задания ЕГЭ/ОГЭ с сайта «Решу ЕГЭ» (sdamgia.ru)
+Pillow==11.3.0               # картинки-карточки, талисман Маячок, маяк

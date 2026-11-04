@@ -2,7 +2,7 @@ services:
   bot:
     build:
       context: .
-      dockerfile: docker/bot.Dockerfile
+      dockerfile: Dockerfile
     depends_on:
       db:
         condition: service_healthy
@@ -11,7 +11,7 @@ services:
     env_file:
       - .env
     ports:
-      # Мини-приложение: http://localhost:8080 (в интернет его выводит туннель Tuna — см. docs)
+      # Мини-приложение: http://localhost:8080 (в интернет его выводит Caddy по HTTPS — см. docs/SERVER.md)
       - "127.0.0.1:${WEBAPP_PORT:-8080}:${WEBAPP_PORT:-8080}"
     volumes:
       # Банк заданий: правьте data/tasks.json на компьютере, бот подхватит изменения без перезапуска

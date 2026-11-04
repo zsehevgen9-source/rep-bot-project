@@ -25,4 +25,4 @@ jobs:
         run: python tests/test_bot.py
 
       - name: Сборка Docker-образа
-        run: docker build -f docker/bot.Dockerfile -t max-bot:ci .
+        run: docker build -t mayachok:ci .
