@@ -73,6 +73,54 @@ class PrivacyMixin:
         await self.redis.set_state(f"awaiting_name_{uid}", "true", ex=3600)
         await self._send_with_voice(message, "Отлично! 🎒 Давай познакомимся: как тебя зовут?")
 
+    # ---------- 🔄 сменить роль (учитель или родитель → снова выбор «Кто ты?») ----------
+
+    def _env_teacher(self, uid: int) -> bool:
+        return uid in {int(x) for x in str(getattr(settings, "TEACHER_IDS", "") or "").replace(" ", "").split(",")
+                       if x.strip().lstrip("-").isdigit()}
+
+    async def role_switch_info(self, uid: int) -> Dict[str, Any]:
+        children = await self._children_of(uid)
+        return {"teacher": await self._is_teacher(uid, explicit=True), "env_teacher": self._env_teacher(uid),
+                "children": len(children), "classes": len(load_json(await self.redis.get_state(f"tclasses_{uid}"), []))}
+
+    async def ask_switch_role(self, message: NormalizedMessage) -> None:
+        info = await self.role_switch_info(message.user_id)
+        lines = ["🔄 Сменить роль?", "", "Я снова спрошу «Кто ты?» — ученик, родитель или учитель."]
+        if info["teacher"]:
+            lines.append("Классы, задания и профиль учителя сохранятся: нажмёте снова «Я учитель» — всё будет на месте.")
+        if info["children"]:
+            lines.append(f"Вы отключитесь от детей ({info['children']}) — они получат сообщение. "
+                         "Подключиться снова можно по коду.")
+        if info["env_teacher"]:
+            lines.append("⚠️ Ваш ID записан учителем в настройках сервера (TEACHER_IDS) — кабинет учителя останется.")
+        await self._quiet(message, "\n".join(lines),
+                          keyboard=_kb([[_btn("✅ Да, сменить роль", "role_switch_yes")],
+                                        [_back("t_prof" if info["teacher"] else "parent_menu")]]))
+
+    async def switch_role(self, uid: int) -> None:
+        """Убираем роль учителя и родителя (данные класса сохраняются), чтобы человек выбрал роль заново."""
+        teachers = [t for t in load_json(await self.redis.get_state("teachers"), []) if t != uid]
+        await self.redis.set_state("teachers", json.dumps(teachers))
+        await self.redis.delete_state(f"teacher_req_{uid}")
+        for child in await self._children_of(uid):
+            parents = await self._parents_of(child)
+            await self._save_profile(child, parents=json.dumps([p for p in parents if p.get("user_id") != uid]))
+            try:
+                await self.api.send_message(user_id=child, text="👨‍👩‍👧 Родитель отключился от твоих занятий.")
+            except Exception as e:
+                logger.warning("Не удалось сообщить ученику %s: %s", child, e)
+        code = await self.redis.get_state(f"fcode_of_{uid}")
+        if code:
+            await self.redis.delete_state(f"fcode_{code}")
+        for key in ("children", "fcode_of", "is_parent", "awaiting_parent_code"):
+            await self.redis.delete_state(f"{key}_{uid}")
+        await self._reset_modes(uid)
+
+    async def switch_role_yes(self, message: NormalizedMessage) -> None:
+        await self.switch_role(message.user_id)
+        await self.ask_role(message)
+
     async def choose_teacher(self, message: NormalizedMessage) -> None:
         """«👩‍🏫 Я учитель». По умолчанию кабинет открывается сразу (TEACHER_APPROVAL=false), администратору — только
         уведомление. Это безопасно: учитель видит лишь тех учеников, кто сам вступил в его класс по коду.

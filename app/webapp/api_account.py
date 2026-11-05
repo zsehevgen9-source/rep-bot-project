@@ -184,6 +184,12 @@ class AccountMixin:
         async with self._handler() as h:
             return {"code": await h.family_code(uid)}
 
+    async def role_switch(self, uid: int) -> Dict[str, Any]:
+        """🔄 Сменить роль: учитель/родитель → снова «Кто ты?» (классы учителя сохраняются)."""
+        async with self._handler() as h:
+            await h.switch_role(uid)
+            return {"ok": True, "env_teacher": h._env_teacher(uid)}
+
     async def family_cancel(self, uid: int) -> Dict[str, Any]:
         """«Я не родитель»: вернуться к выбору роли (только пока дети не подключены)."""
         async with self._handler() as h:

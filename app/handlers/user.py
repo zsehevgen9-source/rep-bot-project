@@ -575,6 +575,12 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
             elif payload.startswith("pr_") and await self._family_payload(message, payload):
                 pass
 
+            elif payload == "role_switch":
+                await self.ask_switch_role(message)
+
+            elif payload == "role_switch_yes":
+                await self.switch_role_yes(message)
+
             elif payload == "parent_cancel":
                 if await self.cancel_parent(uid):
                     await self.ask_role(message)

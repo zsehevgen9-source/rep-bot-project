@@ -180,7 +180,7 @@ class TeacherMixin:
         rows = [[_btn("🔄 Начальные/предметник", "t_kind")]]
         if profile.get("kind") == "subject":
             rows.append([_btn("📐 Мои предметы", "t_subjects")])
-        rows += [[_btn("✏️ Имя для учеников", "t_rename")], [_back("t_menu")]]
+        rows += [[_btn("✏️ Имя для учеников", "t_rename")], [_btn("🔄 Сменить роль", "role_switch")], [_back("t_menu")]]
         await self._quiet(message, "👤 Профиль учителя\n\n" + self._profile_line(profile), keyboard=_kb(rows))
 
     # ---------- данные класса ----------

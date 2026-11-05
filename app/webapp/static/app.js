@@ -1030,6 +1030,7 @@
       el("div", { class: "section btn-row" },
         el("button", { class: "btn secondary", onclick: parentOnboarding }, "➕ Ещё ребёнок"),
         el("button", { class: "btn secondary", onclick: showPrivacy }, "📄 Политика")),
+      d.role === "parent" ? el("div", { class: "section" }, el("button", { class: "btn secondary", onclick: () => switchRole("parent") }, "🔄 Сменить роль")) : null,
       d.children.length && d.role !== "student" ? el("div", { class: "section" }, el("button", { class: "btn secondary danger", onclick: () => {
         let close;
         close = sheet(el("h2", {}, "Отключиться от ребёнка"), el("div", { class: "list", style: "margin-top:10px" }, d.children.map((c) => el("button", {
@@ -1557,9 +1558,28 @@
         el("div", { class: "section" }, el("div", { class: "label-s" }, "Как к вам обращаться ученикам?"), nameInput),
         el("div", { class: "section" }, el("button", { class: "btn", onclick: async () => {
           try { await api("/api/teacher/profile", st); setBack(null); toast("Профиль сохранён ✅"); renderTeacher(); } catch (e) { toast(e.message); }
-        } }, "💾 Сохранить")));
+        } }, "💾 Сохранить")),
+        el("div", { class: "section" }, el("button", { class: "btn secondary", onclick: () => switchRole("teacher") }, "🔄 Сменить роль")));
     };
     draw();
+  }
+
+  // 🔄 Сменить роль: учитель или родитель снова выбирает «Кто ты?» (классы учителя сохраняются)
+  function switchRole(kind) {
+    let close;
+    close = sheet(el("h2", {}, "🔄 Сменить роль?"),
+      el("p", { class: "muted", style: "margin:6px 0 14px" }, kind === "teacher"
+        ? "Снова появится выбор «Кто ты?». Классы, задания и профиль учителя сохранятся — нажмёте «Я учитель», и всё будет на месте."
+        : "Снова появится выбор «Кто ты?». Вы отключитесь от детей — они получат сообщение. Подключиться снова можно по коду."),
+      el("div", { class: "btn-row" }, el("button", { class: "btn secondary", onclick: () => close() }, "Отмена"),
+        el("button", { class: "btn", onclick: async () => {
+          close();
+          try {
+            const r = await api("/api/role/switch", {});
+            if (r.env_teacher) toast("Ваш ID записан учителем в настройках сервера — кабинет учителя останется", 4000);
+          } catch (e) { return toast(e.message); }
+          S.child = null; S.tab = "home"; setBack(null); load();
+        } }, "Сменить")));
   }
 
   function newClassSheet(t) {
@@ -2054,6 +2074,7 @@
       if (path === "/api/parent/code") return { code: "123456" };
       if (path === "/api/family/code") { this.role = "parent"; return { code: "654321" }; }
       if (path === "/api/family/cancel") { this.role = "new"; return { ok: true }; }
+      if (path === "/api/role/switch") { this.role = "new"; return { ok: true }; }
       if (path === "/api/family/join") { if (body.code !== "654321") throw new Error("Код не подошёл (в демо — 654321)"); this.cfg.parents = [{ id: 3, n: 1, since: "сегодня" }]; return this.cfg; }
       if (path === "/api/parent/unlink") { this.cfg.parents = []; return this.cfg; }
       if (path === "/api/class/join") { this.cfg.tclass = { name: "5А", teachers: ["Анна Петровна"] }; return this.cfg; }

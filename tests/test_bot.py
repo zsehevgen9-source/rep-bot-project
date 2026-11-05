@@ -2398,6 +2398,16 @@ async def test_family_and_class_extras():
     api.files_sent.clear(); r = await A.teacher_export(T, code); assert "отправлена" in r["note"] and api.files_sent[-1][0] == T
     await fails(A.teacher_export(9999, code), 404)
     assert not WIDE, sorted({tuple(r) for r in WIDE})
+    # 🔄 сменить роль: учитель — классы сохраняются; родитель — отключается от детей
+    out = await press(T, "t_prof"); assert ("🔄 Сменить роль", "role_switch") in btns(out)
+    out = await press(T, "role_switch"); assert "Классы, задания и профиль учителя сохранятся" in last(out)
+    out = await press(T, "role_switch_yes"); assert ("👩‍🏫 Я учитель", "role_teacher") in btns(out)
+    out = await say(T, "/start"); assert ("🎒 Я ученик", "role_student") in btns(out) and f"tclass_{code}" in redis.d
+    out = await press(T, "role_teacher"); assert "Кабинет учителя" in last(out) and "5А" in last(out)   # всё на месте
+    out = await press(P, "parent_menu"); assert ("🔄 Сменить роль", "role_switch") in btns(out)
+    n = len(api.sent); out = await press(P, "role_switch_yes")
+    assert ("👨‍👩‍👧 Я родитель", "parent_start") in btns(out) and json.loads(db.rows[C].parents) == []
+    assert any(m["to"] == C and "Родитель отключился" in m["text"] for m in api.sent[n:])
     print("   Учитель: тема урока одной кнопкой, срок и автонапоминание, карта тем, Excel, звёзды и грамоты, объявление: OK")
 
 
@@ -2801,6 +2811,8 @@ async def test_miniapp_account():
     try:
         assert (await A.state(AD))["role"] == "new"
         r = await A.teacher_request(AD); assert r["teacher"] and (await A.state(AD))["role"] == "teacher"   # «Я учитель» и у админа
+        assert (await A.role_switch(AD))["ok"] and (await A.state(AD))["role"] == "new"        # 🔄 сменить роль
+        r = await A.teacher_request(AD); assert (await A.state(AD))["role"] == "teacher"
     finally:
         settings.admin_ids = {ADMIN}
     T = 9863

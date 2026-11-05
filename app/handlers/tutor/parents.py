@@ -263,6 +263,7 @@ class ParentMixin:
             rows.append([_btn(f"🚫 Отключить · {label}", f"parent_leave_{child_uid}")])
         rows.append([_btn("➕ Ещё ребёнок", "parent_start")])
         rows.append([_btn("🔔 Сигналы: " + ("вкл" if await self.alerts_on(uid) else "выкл"), "pr_alerts")])
+        rows.append([_btn("🔄 Сменить роль", "role_switch")])
         text = (f"{note}\n\n" if note else "") + "👨‍👩‍👧 Родительский раздел\n\n" + "\n".join(lines) + (
             "\n\n📊 — отчёт о занятиях; там же 👏 похвала, 🎯 цель недели с наградой и 💡 как помочь дома.\n"
             "🗓 — расписание уроков за ребёнка. Отчёт за неделю я пришлю сам в воскресенье в 18:00.\n"

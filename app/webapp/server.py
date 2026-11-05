@@ -252,6 +252,7 @@ def create_app(api: MiniAppAPI, bot_token: str) -> web.Application:
     app.router.add_post("/api/family/code", post(api.family_code))
     app.router.add_post("/api/family/join", post(api.join_family, "code"))
     app.router.add_post("/api/family/cancel", post(api.family_cancel))
+    app.router.add_post("/api/role/switch", post(api.role_switch))
     app.router.add_post("/api/parent/unlink", post(api.unlink_parent, "parent_id"))
     app.router.add_post("/api/parent/leave", post(api.leave_child, "child"))
     app.router.add_post("/api/class/join", post(api.join_class, "code"))
