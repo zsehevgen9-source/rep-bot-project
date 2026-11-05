@@ -64,6 +64,23 @@
     if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
     return many;
   }
+  // ---- 🎨 оформление: светлая / тёмная / как в телефоне (MAX). Хранится на этом устройстве ----
+  function getTheme() { try { return localStorage.getItem("mayachok_theme") || "auto"; } catch (e) { return S.theme || "auto"; } }
+  function setTheme(theme) {
+    S.theme = theme;
+    try { theme === "auto" ? localStorage.removeItem("mayachok_theme") : localStorage.setItem("mayachok_theme", theme); } catch (e) { /* без памяти — до закрытия */ }
+    if (theme === "auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", theme);
+  }
+  function themePicker(redraw) {
+    const now = getTheme();
+    return el("div", { class: "section" },
+      el("div", { class: "section-head" }, el("h2", {}, "🎨 Оформление")),
+      el("div", { class: "segs", style: "margin-top:0" }, [["light", "☀️ Светлая"], ["dark", "🌙 Тёмная"], ["auto", "📱 Как в MAX"]].map(([id, title]) =>
+        el("button", { class: "seg" + (now === id ? " active" : ""), onclick: () => { setTheme(id); if (redraw) redraw(); } }, title))),
+      el("p", { class: "muted", style: "margin:8px 4px 0;font-size:13px" }, "«Как в MAX» — светлая или тёмная, как в настройках телефона и мессенджера."));
+  }
+
   function toast(text, ms) {
     $toast.textContent = text;
     $toast.hidden = false;
@@ -349,6 +366,7 @@
             ? [el("p", {}, `Ты в классе «${st.tclass.name}»`, st.tclass.teachers.length ? ` · ${st.tclass.teachers.join(", ")}` : ""),
               el("button", { class: "btn secondary", style: "margin-top:10px", onclick: leaveClass }, "🚪 Выйти из класса")]
             : joinForm())) : null,
+        themePicker(draw),
         el("div", { class: "section" }, el("button", { class: "btn secondary", onclick: () => openGuide() }, "❓ Как пользоваться приложением")),
         el("div", { class: "section" },
           el("div", { class: "section-head" }, el("h2", {}, "🔒 Данные")),
@@ -456,7 +474,8 @@
           "Имя, класс и голос Маячка (читать сразу, по кнопке или молчать).",
           "Увлечения — Маячок объясняет темы через них: футбол, игры, музыку…",
           "👨‍👩‍👧 Родители — введи код мамы или папы, чтобы они видели твои успехи.",
-          "🏫 Класс учителя — введи код, который дал учитель." ] },
+          "🏫 Класс учителя — введи код, который дал учитель.",
+          "🎨 Оформление — светлая или тёмная тема." ] },
         { mood: "cheer", title: "Готово! 🚀", text: "Начни с главной или просто напиши Маячку в чат.", points: ["Подсказка всегда открывается снова кнопкой ❓ вверху."] },
       ];
     }
@@ -1030,6 +1049,7 @@
       el("div", { class: "section btn-row" },
         el("button", { class: "btn secondary", onclick: parentOnboarding }, "➕ Ещё ребёнок"),
         el("button", { class: "btn secondary", onclick: showPrivacy }, "📄 Политика")),
+      d.role === "parent" ? themePicker(() => renderKids(d)) : null,
       d.role === "parent" ? el("div", { class: "section" }, el("button", { class: "btn secondary", onclick: () => switchRole("parent") }, "🔄 Сменить роль")) : null,
       d.children.length && d.role !== "student" ? el("div", { class: "section" }, el("button", { class: "btn secondary danger", onclick: () => {
         let close;
@@ -1559,6 +1579,7 @@
         el("div", { class: "section" }, el("button", { class: "btn", onclick: async () => {
           try { await api("/api/teacher/profile", st); setBack(null); toast("Профиль сохранён ✅"); renderTeacher(); } catch (e) { toast(e.message); }
         } }, "💾 Сохранить")),
+        themePicker(draw),
         el("div", { class: "section" }, el("button", { class: "btn secondary", onclick: () => switchRole("teacher") }, "🔄 Сменить роль")));
     };
     draw();

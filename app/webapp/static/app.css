@@ -29,6 +29,16 @@
     color-scheme: dark;
   }
 }
+/* Тема, выбранная вручную (⚙️ → «🎨 Оформление»): тёмная — даже если телефон светлый */
+:root[data-theme="dark"] {
+  --bg: #0f1020;
+  --card: #1b1c33;
+  --text: #eef0ff;
+  --muted: #a3a8c3;
+  --line: #2c2e4a;
+  --shadow: 0 6px 20px rgba(0, 0, 0, .35);
+  color-scheme: dark;
+}
 
 [hidden] { display: none !important; }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }

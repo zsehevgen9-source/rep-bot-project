@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Маячок</title>
   <link rel="icon" href="img/avatar.png">
-  <link rel="stylesheet" href="static/app.css?v=11">
+  <script>
+    /* Тема, выбранная в настройках, — сразу, чтобы экран не мигал (светлая / тёмная / как в телефоне) */
+    try { var t = localStorage.getItem("mayachok_theme"); if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="static/app.css?v=12">
   <!-- MAX Bridge: данные пользователя и кнопка «Назад» (https://dev.max.ru/docs/webapps/bridge) -->
   <script src="https://st.max.ru/js/max-web-app.js"></script>
 </head>
@@ -18,7 +22,7 @@
   </div>
   <nav id="tabs" class="tabs" hidden></nav>
   <div id="toast" class="toast" hidden></div>
-  <script src="static/config.js?v=11"></script>
-  <script src="static/app.js?v=11"></script>
+  <script src="static/config.js?v=12"></script>
+  <script src="static/app.js?v=12"></script>
 </body>
 </html>
