@@ -98,6 +98,18 @@ def parent_report_due(profile: Dict[str, Any], now_utc: datetime) -> bool:
     return profile.get("last_parent_report") != local.date().isoformat()
 
 
+def evening_check_due(profile: Dict[str, Any], now_utc: datetime, hour: int) -> bool:
+    """Вечерние проверки раз в день (в первые 5 минут часа hour по времени ученика): сигналы родителям, сроки заданий."""
+    if not profile.get("grade"):
+        return False
+    local = local_now(now_utc, profile.get("tz_offset"))
+    return local.hour == hour and local.minute < 5
+
+
+FAMILY_CHECK_HOUR = 19   # «давно не занимался» — родителю в 19:00
+CLASS_CHECK_HOUR = 18    # сроки заданий учителя: напоминание за день и итог учителю — в 18:00
+
+
 def build_daily_plan(
     progress: Dict[str, Any], grade: int, subject_ids: List[str], count: int,
     rnd: Optional[random.Random] = None, moment: Optional[datetime] = None,

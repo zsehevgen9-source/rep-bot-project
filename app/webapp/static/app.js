@@ -466,11 +466,17 @@
         { ico: "👨‍👩‍👧", title: "Дети", text: "Список подключённых детей. Подключить ребёнка: продиктуйте ему ваш код.", points: [
           "Нажмите на имя ребёнка — откроется его отчёт.",
           "«➕ Ещё ребёнок» — ваш код для ребёнка. Ребёнок вводит его у себя: «⚙️ Настройки → 👨‍👩‍👧 Родители».",
+          "🔔 Тревожные сигналы — сразу напишу, если ребёнок 3 дня не занимается или получил две двойки подряд.",
           "«🔕 Отключиться» — перестать видеть данные ребёнка." ] },
         { tab: "report", ico: "📋", title: "Отчёт", text: "Последние 7 дней.", points: [
           "Сколько дней занимался и сколько заданий решил.",
           "Процент ответов с первой попытки.",
-          "Оценки за уроки и темы, которые стоит подтянуть." ] },
+          "Оценки за уроки и темы, которые стоит подтянуть.",
+          "📈 График по неделям — растёт ребёнок или нет." ] },
+        { tab: "report", ico: "🎯", title: "Похвала и цель", text: "Мотивация от вас — сильнее любых очков.", points: [
+          "👏 «Похвалить» — ребёнок получит ваши слова и бонусные очки.",
+          "🎯 «Цель недели» — например, 15 заданий → поход в кино. Ребёнок видит прогресс, а когда выполнит — я сообщу вам обоим.",
+          "💡 «Как помочь» у слабой темы — простой совет, как разобрать её дома за 10 минут." ] },
         { tab: "progress", ico: "📊", title: "Прогресс", text: "Подробно по неделе и предметам: что получается, что нет, достижения ребёнка.", points: [] },
         { tab: "schedule", ico: "🗓", title: "Расписание", text: "Можно внести или поправить расписание уроков ребёнка.", points: [
           "Маячок по расписанию предлагает ребёнку закрепить то, что было на уроках.",
@@ -488,14 +494,21 @@
           "Маячок выдаст код класса — продиктуйте или напишите его ученикам.",
           "Ученик вводит код в «⚙️ Настройки → 🏫 Класс учителя».",
           "Класс уже создал коллега? «🔑 По коду» — подключитесь к нему, ученикам ничего делать не нужно." ] },
-        { ico: "👥", title: "3. Внутри класса", text: "Нажмите на класс — три вкладки:", points: [
-          "Ученики — активность за неделю, точность, оценки. Нажмите на ученика — подробный отчёт.",
+        { ico: "👥", title: "3. Внутри класса", text: "Нажмите на класс — вкладки:", points: [
+          "Ученики — активность за неделю, точность, оценки. Нажмите на ученика — отчёт и 🏅 грамота.",
           "Задания — выданные задания и результаты.",
+          "Карта — таблица «ученик × тема»: 🟢 знает, 🟠 изучает, 🔴 подтянуть.",
+          "Звёзды — лучшие за неделю по старанию; можно поздравить класс и вручить грамоты.",
           "Слабые — темы, которые плохо даются классу." ] },
         { ico: "📝", title: "4. Задания", text: "Выберите предмет и тему — задание придёт каждому ученику в чат с Маячком.", points: [
           "Маячок сам составит вопросы и поставит оценку.",
           "В результатах видно, кто сделал, оценки и фото решений.",
+          "⚡ «Сегодня по программе → Задать» — тема урока одной кнопкой.",
+          "⏰ Срок сдачи — за день напомню несдавшим, после срока пришлю вам итог.",
           "🔔 «Напомнить» — напоминание тем, кто ещё не сделал." ] },
+        { ico: "📢", title: "5. Объявление и Excel", text: "Кнопки над вкладками класса:", points: [
+          "📢 Объявление — сообщение всем ученикам, а при желании и их родителям.",
+          "📥 Excel — таблица оценок, недели и карты тем придёт вам в чат с Маячком." ] },
         { mood: "cheer", title: "Готово!", text: "Подсказка всегда открывается снова кнопкой ❓ вверху.", points: [] },
       ];
     }
@@ -651,6 +664,7 @@
     page(
       heroBlock(d, `${hello}, ${d.name || "друг"}!`, lessons.length ? "Готов закрепить сегодняшние уроки?" : "Чем займёмся сегодня?", "happy"),
       statTiles(d),
+      d.goal ? el("div", { class: "section" }, goalCard(d.goal, false)) : null,
       d.games ? chestBanner(d.games.chest) : null,
       d.games ? el("div", { class: "section" }, lighthouseCard(d.games.lighthouse)) : null,
       el("div", { class: "section" },
@@ -1007,6 +1021,12 @@
         }, el("div", { class: "ico", style: tint("#7c3aed") }, "🎒"),
           el("div", { class: "body" }, el("div", { class: "title" }, c.name), el("div", { class: "meta" }, c.grade ? `${c.grade} класс` : "класс не выбран")),
           el("span", { class: "go" }, "›")))) : el("div", { class: "card empty" }, "Пока никто не подключён. Нажмите «➕ Ещё ребёнок» — там ваш код для ребёнка.")),
+      d.alerts === undefined ? null : el("div", { class: "section" }, el("div", { class: "card toggle-row" },
+        el("div", { class: "body" }, el("div", { class: "title" }, "🔔 Тревожные сигналы"),
+          el("div", { class: "meta" }, "Сразу напишу в чат, если ребёнок 3 учебных дня не занимается или получил две двойки подряд")),
+        el("button", { class: "switch" + (d.alerts ? " on" : ""), "aria-label": "Сигналы", onclick: async () => {
+          try { d.alerts = (await api("/api/parent/alerts", {})).alerts; toast(d.alerts ? "🔔 Сигналы включены" : "🔕 Сигналы выключены"); render(); } catch (e) { toast(e.message); }
+        } }, el("i")))),
       el("div", { class: "section btn-row" },
         el("button", { class: "btn secondary", onclick: parentOnboarding }, "➕ Ещё ребёнок"),
         el("button", { class: "btn secondary", onclick: showPrivacy }, "📄 Политика")),
@@ -1022,11 +1042,87 @@
     );
   }
 
+  // ---- плюшки родителя: похвала, цель недели, «как помочь дома», график недель ----
+
+  function weeksChart(weeks) {
+    const max = Math.max(1, ...weeks.map((w) => w.solved));
+    return el("div", { class: "card" },
+      el("div", { class: "weeks" }, weeks.map((w, i) => el("div", { class: "wcol" + (i === weeks.length - 1 ? " now" : "") },
+        el("div", { class: "n" }, w.solved),
+        el("div", { class: "pillar" + (w.solved ? " on" : ""), style: `height:${Math.max(6, Math.round(90 * w.solved / max))}px` }),
+        el("div", { class: "d" }, i === weeks.length - 1 ? "эта" : w.label.split("–")[0]),
+        el("div", { class: "acc" }, w.accuracy === null ? "—" : `${w.accuracy}%`)))),
+      el("p", { class: "muted", style: "font-size:13px;margin-top:8px;text-align:center" }, "Решено заданий по неделям · под столбиком — % с первой попытки"));
+  }
+
+  function goalCard(g, forParent, onEdit) {
+    if (!g) return null;
+    const pctDone = Math.min(100, Math.round(100 * g.solved / g.target));
+    return el("div", { class: "card goal" + (g.done ? " done" : "") },
+      el("div", { class: "goal-top" }, el("span", { class: "goal-ico" }, g.done ? "🎉" : "🎯"),
+        el("div", { class: "body" },
+          el("div", { class: "title" }, g.done ? "Цель недели выполнена!" : `Цель недели: ${Math.min(g.solved, g.target)} из ${g.target}`),
+          el("div", { class: "meta" }, g.prize ? `🎁 Награда: «${g.prize}»` : (forParent ? "без награды" : "от родителя"))),
+        forParent ? el("button", { class: "btn secondary small", onclick: onEdit }, "Изменить") : null),
+      el("div", { class: "bar" }, el("i", { style: `width:${pctDone}%;background:${g.done ? "var(--green)" : "var(--orange)"}` })),
+      g.done ? null : el("p", { class: "muted", style: "font-size:13px;margin-top:6px" },
+        `Осталось ${g.left} ${plural(g.left, "задание", "задания", "заданий")} · дней до конца недели: ${g.days_left}`));
+  }
+
+  function familyBlock(d) {
+    const f = d.family;
+    if (!f) return null;
+    const refresh = (fam) => { S.data.family = fam; render(); };
+    const praise = () => {
+      let close;
+      close = sheet(el("h2", {}, `👏 Похвалить: ${d.name}`),
+        el("p", { class: "muted", style: "margin:6px 0 12px" }, "Ребёнок получит ваши слова и бонусные очки. Хвалить можно раз в день."),
+        el("div", { class: "list" }, f.praises.map((p, i) => el("button", { class: "item", onclick: async () => {
+          close();
+          try { const r = await api("/api/parent/praise", { child: S.child, phrase: i }); toast(r.note, 3500); refresh(r.family); } catch (e) { toast(e.message); }
+        } }, el("div", { class: "body" }, el("div", { class: "title" }, p)), el("span", { class: "go" }, "›")))));
+    };
+    const editGoal = () => {
+      let target = f.goal ? f.goal.target : 10, close;
+      const prize = el("input", { class: "input", placeholder: "Награда, например: поход в кино", maxlength: "60", value: f.goal ? f.goal.prize : "" });
+      const chips = el("div", { class: "picker" });
+      const drawChips = () => chips.replaceChildren(...f.goal_choices.map((n) => el("button", { class: "chip" + (n === target ? " gold" : ""), onclick: () => { target = n; drawChips(); } }, `${n}`)));
+      drawChips();
+      close = sheet(el("h2", {}, "🎯 Цель недели"),
+        el("p", { class: "muted", style: "margin:6px 0 10px" }, "Сколько заданий решить за неделю (пн–вс):"), chips,
+        el("p", { class: "muted", style: "margin:12px 0 8px" }, "Награда (можно без неё):"), prize,
+        el("div", { class: "btn-row" },
+          f.goal ? el("button", { class: "btn secondary danger", onclick: async () => {
+            close(); try { refresh((await api("/api/parent/goal", { child: S.child, target: 0 })).family); toast("Цель убрана"); } catch (e) { toast(e.message); }
+          } }, "Убрать") : null,
+          el("button", { class: "btn", onclick: async () => {
+            close();
+            try { refresh((await api("/api/parent/goal", { child: S.child, target, prize: prize.value })).family); toast("✅ Цель поставлена — ребёнок уже знает", 3000); } catch (e) { toast(e.message); }
+          } }, "Сохранить")),
+        el("p", { class: "muted", style: "font-size:13px;margin-top:10px" }, "Когда ребёнок выполнит цель, я сообщу вам обоим 🎉"));
+    };
+    return [
+      el("div", { class: "btn-row" },
+        el("button", { class: "btn", disabled: f.praised_today, onclick: praise }, f.praised_today ? "👏 Уже похвалили" : "👏 Похвалить"),
+        f.goal ? null : el("button", { class: "btn secondary", onclick: editGoal }, "🎯 Цель недели")),
+      f.goal ? el("div", { class: "section" }, goalCard(f.goal, true, editGoal)) : null,
+      el("div", { class: "section" }, el("div", { class: "section-head" }, el("h2", {}, "📈 По неделям")), weeksChart(f.weeks)),
+    ];
+  }
+
+  async function helpSheet(index, t) {
+    const box = el("div", { class: "card", style: "white-space:pre-line;font-size:15px;margin-top:10px" }, "💡 Составляю совет…");
+    sheet(el("h2", {}, `💡 Как помочь дома`), el("p", { class: "muted", style: "margin-top:4px" }, `${t.subject}: «${t.topic}»`), box);
+    try { box.textContent = (await api("/api/parent/help", { child: S.child, index })).text; } catch (e) { box.textContent = e.message; }
+  }
+
   function renderReport(d) {
     const r = d.report;
     setBack(() => { S.child = null; S.tab = "kids"; load(); });
+    const helpTopics = (d.family && d.family.help_topics) || [];
     page(
       heroBlock(d, d.name || "Ребёнок", "Отчёт за последние 7 дней", r.solved ? "cheer" : "happy"),
+      familyBlock(d),
       el("div", { class: "stats" },
         el("div", { class: "stat" }, el("div", { class: "label" }, "Дни занятий"), el("div", { class: "value", style: "color:var(--indigo)" }, `${r.days}/7`)),
         el("div", { class: "stat" }, el("div", { class: "label" }, "Решено"), el("div", { class: "value", style: "color:var(--teal)" }, r.solved)),
@@ -1040,9 +1136,13 @@
           : el("div", { class: "card empty" }, "Оценок за уроки пока нет.")),
       el("div", { class: "section" },
         el("div", { class: "section-head" }, el("h2", {}, "Стоит подтянуть")),
-        d.weak.length ? el("div", { class: "list" }, d.weak.slice(0, 6).map((t) => el("div", { class: "item" },
-          el("span", { class: "dot", style: "background:var(--red)" }),
-          el("div", { class: "body" }, el("div", { class: "title" }, t.topic), el("div", { class: "meta" }, t.subject)))))
+        d.weak.length ? el("div", { class: "list" }, d.weak.slice(0, 6).map((t) => {
+          const hi = helpTopics.findIndex((h) => h.topic === t.topic && h.subject_id === t.subject_id);
+          return el("div", { class: "item" },
+            el("span", { class: "dot", style: "background:var(--red)" }),
+            el("div", { class: "body" }, el("div", { class: "title" }, t.topic), el("div", { class: "meta" }, t.subject)),
+            hi >= 0 ? el("button", { class: "btn small secondary", onclick: () => helpSheet(hi, t) }, "💡 Как помочь") : null);
+        }))
           : el("div", { class: "card empty" }, "Слабых тем нет 👍")),
       el("div", { class: "section" },
         el("div", { class: "section-head" }, el("h2", {}, "Серия и награды")),
@@ -1497,6 +1597,8 @@
     let c;
     try { c = await api(`/api/teacher/class?code=${encodeURIComponent(code)}`); } catch (e) { toast(e.message); S.quiz = null; renderTeacher(); return; }
     let part = tab || (fresh ? "students" : "students");
+    const STATUS_DOT = { known: "🟢", mastered: "🟢", learning: "🟠", weak: "🔴" };
+    const fmtDue = (iso) => iso ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}` : "";
     const draw = () => {
       const seg = (id, title) => el("button", { class: "seg" + (part === id ? " active" : ""), onclick: () => { part = id; draw(); } }, title);
       let body;
@@ -1513,14 +1615,40 @@
           c.assignments.length ? el("div", { class: "list", style: "margin-top:12px" }, c.assignments.map((a) => el("button", { class: "item", onclick: () => openAssignment(c, a.id) },
             el("div", { class: "ico", style: tint("#7c3aed") }, a.id),
             el("div", { class: "body" }, el("div", { class: "title" }, a.topic),
-              el("div", { class: "meta" }, `${a.subject} · выполнили ${a.done}/${c.students.length} · 📸 ${a.photos}` + (a.avg_mark ? ` · ср. ${a.avg_mark}` : ""))),
+              el("div", { class: "meta" }, `${a.subject} · выполнили ${a.done}/${c.students.length} · 📸 ${a.photos}` + (a.avg_mark ? ` · ср. ${a.avg_mark}` : "") + (a.due ? ` · ⏰ до ${fmtDue(a.due)}` : ""))),
             el("span", { class: "go" }, "›"))))
             : el("p", { class: "muted", style: "margin-top:12px" }, "Заданий пока не было.")];
+      } else if (part === "map") {
+        const m = c.map;
+        body = m.topics.length ? [el("p", { class: "muted", style: "margin:0 4px 8px;font-size:14px" }, "🟢 знает · 🟠 изучает · 🔴 стоит подтянуть"),
+          el("div", { class: "card map-wrap" }, el("table", { class: "map" },
+            el("thead", {}, el("tr", {}, el("th", {}, ""), m.topics.map((t, i) => el("th", { title: `${t.subject}: ${t.topic}` }, `${i + 1}`)))),
+            el("tbody", {}, m.rows.map((r) => el("tr", {}, el("td", { class: "nm" }, r.name), r.cells.map((cell) => el("td", {}, cell ? STATUS_DOT[cell] : "·"))))))),
+          el("div", { class: "list", style: "margin-top:10px" }, m.topics.map((t, i) => {
+            const red = m.rows.filter((r) => r.cells[i] === "weak").length;
+            return el("div", { class: "item" }, el("div", { class: "ico", style: tint(red ? "#ef4444" : "#22c55e") }, i + 1),
+              el("div", { class: "body" }, el("div", { class: "title" }, t.topic), el("div", { class: "meta" }, `${t.subject}` + (red ? ` · подтянуть: ${red}` : ""))),
+              red ? el("button", { class: "btn small", onclick: () => assignSheet(c, t.subject_id, t.topic) }, "📝") : null);
+          }))]
+          : el("div", { class: "card empty" }, "Карта заполнится, когда ученики пройдут тесты и задания.");
+      } else if (part === "stars") {
+        const st = c.stars;
+        body = st.top.length ? [el("p", { class: "muted", style: "margin:0 4px 8px;font-size:14px" }, "Не за оценки, а за старание: дни занятий и решённые задания за 7 дней."),
+          el("div", { class: "list" }, st.top.map((s, i) => el("div", { class: "item" },
+            el("div", { class: "medal" }, ["🥇", "🥈", "🥉"][i]),
+            el("div", { class: "body" }, el("div", { class: "title" }, s.name), el("div", { class: "meta" }, `${s.days} дн. из 7 · решено ${s.solved}` + (s.streak > 1 ? ` · 🔥 ${s.streak}` : ""))),
+            el("button", { class: "btn small secondary", onclick: () => certSheet(c, s) }, "🏅")))),
+          st.streak ? el("div", { class: "card", style: "margin-top:10px" }, `🔥 Самая длинная серия: ${st.streak.name} — ${st.streak.streak} дн. подряд`) : null,
+          st.accurate ? el("div", { class: "card", style: "margin-top:10px" }, `🎯 Точнее всех: ${st.accurate.name} — ${st.accurate.accuracy}% с первой попытки`) : null,
+          el("button", { class: "btn", style: "margin-top:12px", onclick: async () => {
+            try { toast(`📢 Отправлено ученикам: ${(await api("/api/teacher/stars", { code: c.code })).sent}`, 3000); } catch (e) { toast(e.message); }
+          } }, "📢 Поздравить класс")]
+          : el("div", { class: "card empty" }, "На этой неделе пока никто не занимался.");
       } else {
         body = c.weak.length ? el("div", { class: "list" }, c.weak.map((w) => el("div", { class: "item" },
           el("div", { class: "ico", style: tint("#ef4444") }, w.count),
           el("div", { class: "body" }, el("div", { class: "title" }, w.topic), el("div", { class: "meta" }, `${w.subject} · у ${w.count} уч.`)),
-          el("button", { class: "btn small", onclick: () => assign(c, w.subject_id, w.topic) }, "📝"))))
+          el("button", { class: "btn small", onclick: () => assignSheet(c, w.subject_id, w.topic) }, "📝"))))
           : el("div", { class: "card empty" }, "Слабых тем пока нет — или ученики ещё не проходили тесты.");
       }
       page(
@@ -1531,7 +1659,15 @@
           el("div", { class: "stat" }, el("div", { class: "label" }, "Учеников"), el("div", { class: "value", style: "color:var(--indigo)" }, c.students.length)),
           el("div", { class: "stat" }, el("div", { class: "label" }, "Занимались"), el("div", { class: "value", style: "color:var(--teal)" }, c.week.active)),
           el("div", { class: "stat" }, el("div", { class: "label" }, "Решено за 7 дн."), el("div", { class: "value", style: "color:var(--green)" }, c.week.solved))),
-        el("div", { class: "segs" }, seg("students", "👥 Ученики"), seg("tasks", "📝 Задания"), seg("weak", "🎯 Слабые")),
+        (c.today || []).map((t) => el("div", { class: "card today-topic" },
+          el("div", { class: "body" }, el("div", { class: "meta" }, `⚡ Сегодня по программе · ${t.subject}`), el("div", { class: "title" }, t.topic)),
+          el("button", { class: "btn small", onclick: () => quick(c, t) }, "Задать"))),
+        el("div", { class: "btn-row" },
+          el("button", { class: "btn secondary small", onclick: () => announceSheet(c) }, "📢 Объявление"),
+          el("button", { class: "btn secondary small", onclick: async () => {
+            try { toast((await api("/api/teacher/export", { code: c.code })).note, 3500); } catch (e) { toast(e.message); }
+          } }, "📥 Excel в чат")),
+        el("div", { class: "segs five" }, seg("students", "Ученики"), seg("tasks", "Задания"), seg("map", "Карта"), seg("stars", "Звёзды"), seg("weak", "Слабые")),
         el("div", { class: "section", style: "margin-top:12px" }, body),
         el("div", { class: "section" }, el("button", { class: "btn secondary danger", onclick: () => removeClass(c) }, c.owner ? "🗑 Удалить класс" : "🚪 Отключиться от класса")),
       );
@@ -1539,26 +1675,83 @@
     async function studentSheet(cls, s) {
       let report = "Загружаю…";
       try { report = (await api(`/api/teacher/student?code=${cls.code}&student=${s.id}`)).report; } catch (e) { report = e.message; }
-      sheet(el("h2", {}, s.name), el("div", { class: "card", style: "white-space:pre-line;margin-top:10px;font-size:15px" }, report));
+      let close;
+      close = sheet(el("h2", {}, s.name), el("div", { class: "card", style: "white-space:pre-line;margin-top:10px;font-size:15px" }, report),
+        el("button", { class: "btn secondary", style: "margin-top:12px", onclick: () => { close(); certSheet(cls, s); } }, "🏅 Вручить грамоту"));
     }
-    async function assign(cls, sid, topic) {
+    function certSheet(cls, s) {
+      let close;
+      close = sheet(el("h2", {}, `🏅 Грамота: ${s.name}`), el("p", { class: "muted", style: "margin:6px 0 12px" }, "Ученик получит грамоту-картинку в чат. За что?"),
+        el("div", { class: "list" }, (cls.cert_reasons || []).map((reason, i) => el("button", { class: "item", onclick: async () => {
+          close();
+          try { toast((await api("/api/teacher/cert", { code: cls.code, student: s.id, reason: i })).note, 3500); } catch (e) { toast(e.message); }
+        } }, el("div", { class: "body" }, el("div", { class: "title" }, reason)), el("span", { class: "go" }, "›")))));
+    }
+    function announceSheet(cls) {
+      let close;
+      const text = el("textarea", { class: "input", rows: "4", maxlength: "1500", placeholder: "Например: Завтра контрольная по дробям — повторите правила!" });
+      const parents = el("input", { type: "checkbox" });
+      const send = async () => {
+        if (!text.value.trim()) return toast("Напишите текст объявления");
+        close();
+        try {
+          const r = await api("/api/teacher/announce", { code: cls.code, text: text.value, parents: parents.checked });
+          toast(`📢 Отправлено: ученикам — ${r.students}` + (parents.checked ? `, родителям — ${r.parents}` : ""), 3500);
+        } catch (e) { toast(e.message); }
+      };
+      close = sheet(el("h2", {}, `📢 Объявление · ${cls.name}`), el("div", { style: "margin-top:10px" }, text),
+        el("label", { class: "check" }, parents, " Отправить и родителям учеников"),
+        el("div", { class: "btn-row" }, el("button", { class: "btn", onclick: send }, "Отправить")));
+    }
+    function dueSheet(cls, aid, topic) {
+      let close;
+      const set = async (choice) => {
+        close();
+        if (!choice) return;
+        try { await api("/api/teacher/due", { code: cls.code, aid, choice }); toast("⏰ Срок поставлен — за день напомню несдавшим", 3000); openClass(cls.code, false, "tasks"); } catch (e) { toast(e.message); }
+      };
+      close = sheet(el("h2", {}, "⏰ Срок сдачи"), el("p", { class: "muted", style: "margin:6px 0 12px" }, `«${topic}» — к какому дню? За день я напомню тем, кто не сделал, а после срока пришлю вам итог.`),
+        el("div", { class: "btn-row" }, el("button", { class: "btn secondary", onclick: () => set("d") }, "Завтра"), el("button", { class: "btn secondary", onclick: () => set("f") }, "Пятница")),
+        el("div", { class: "btn-row" }, el("button", { class: "btn secondary", onclick: () => set("w") }, "Через неделю"), el("button", { class: "btn secondary", onclick: () => set("") }, "Без срока")));
+    }
+    async function quick(cls, t) {
       try {
-        const r = await api("/api/teacher/assign", { code: cls.code, subject_id: sid, topic });
+        const r = await api("/api/teacher/quick", { code: cls.code, subject_id: t.subject_id });
+        toast(`✅ Задание «${r.topic}» отправлено классу`, 3000);
+        if (r.aid) dueSheet(cls, r.aid, r.topic); else openClass(cls.code, false, "tasks");
+      } catch (e) { toast(e.message); }
+    }
+    async function assignDue(cls, sid, topic, due) {
+      try {
+        const r = await api("/api/teacher/assign", { code: cls.code, subject_id: sid, topic, due: due || null });
         toast(r.note ? r.note.split("\n")[0] : "Задание отправлено ✅", 3500);
         openClass(cls.code, false, "tasks");
       } catch (e) { toast(e.message); }
     }
-    function assignSheet(cls) {
-      let close;
+    function assignSheet(cls, presetSid, presetTopic) {
+      let close, due = "";
       const box = el("div", {});
+      const dueRow = el("div", { class: "picker", style: "margin-top:10px" });
+      const drawDue = () => dueRow.replaceChildren(el("span", { class: "muted", style: "font-size:14px;align-self:center" }, "⏰ Срок:"),
+        ...[["", "без срока"], ["d", "завтра"], ["f", "пятница"], ["w", "неделя"]].map(([id, title]) =>
+          el("button", { class: "chip" + (due === id ? " gold" : ""), onclick: () => { due = id; drawDue(); } }, title)));
+      drawDue();
+      const assign = (c, sid, topic) => { close(); assignDue(c, sid, topic, due); };
+      if (presetTopic) {
+        close = sheet(el("h2", {}, "📝 Задание классу " + cls.name), el("p", { class: "muted", style: "margin:6px 0 4px" }, "Тема:"),
+          el("div", { class: "card" }, el("b", {}, presetTopic)), dueRow,
+          el("div", { class: "btn-row" }, el("button", { class: "btn", onclick: () => assign(cls, presetSid, presetTopic) }, "📝 Отправить классу")));
+        return;
+      }
       const pick = (s) => {
         const input = el("input", { class: "input", placeholder: "Или своя тема", maxlength: "100" });
         box.replaceChildren(el("p", { class: "muted", style: "margin:6px 0 10px" }, `${s.title}: тема задания`),
-          s.now.length ? el("div", { class: "list" }, s.now.map((topic) => el("button", { class: "item", onclick: () => { close(); assign(cls, s.id, topic); } },
+          s.now.length ? el("div", { class: "list" }, s.now.map((topic) => el("button", { class: "item", onclick: () => assign(cls, s.id, topic) },
             el("div", { class: "ico", style: tint(subjIcon(s.id)[1]) }, subjIcon(s.id)[0]),
             el("div", { class: "body" }, el("div", { class: "title" }, topic), el("div", { class: "meta" }, "сейчас по программе")),
             el("span", { class: "go" }, "›")))) : null,
-          el("div", { class: "btn-row" }, input, el("button", { class: "btn small", onclick: () => { if (input.value.trim()) { close(); assign(cls, s.id, input.value.trim()); } } }, "Ок")),
+          el("div", { class: "btn-row" }, input, el("button", { class: "btn small", onclick: () => { if (input.value.trim()) assign(cls, s.id, input.value.trim()); } }, "Ок")),
+          dueRow,
           el("p", { class: "muted", style: "margin-top:10px;font-size:14px" }, "Ученики получат задание в чат: несколько вопросов без подсказок, оценка, потом фото решения."));
       };
       close = sheet(el("h2", {}, "📝 Задание классу " + cls.name), box);
@@ -1589,7 +1782,7 @@
     page(
       el("div", { class: "section-head", style: "margin-top:4px" }, el("h2", { style: "font-size:22px" }, `Задание ${a.id}`), el("span", { class: "note" }, a.subject)),
       el("div", { class: "card" }, el("b", {}, a.topic), el("p", { class: "muted", style: "font-size:14px;margin-top:4px" },
-        `Выполнили ${a.students.filter((s) => s.done).length} из ${a.students.length}`)),
+        `Выполнили ${a.students.filter((s) => s.done).length} из ${a.students.length}` + (a.due ? ` · ⏰ срок до ${a.due.slice(8, 10)}.${a.due.slice(5, 7)}` : ""))),
       el("div", { class: "section list" }, a.students.map((s) => el("div", { class: "item" },
         s.done ? el("div", { class: `mark m${s.mark}` }, s.mark) : el("div", { class: "ico", style: tint("#9ca3af") }, "⏳"),
         el("div", { class: "body" }, el("div", { class: "title" }, s.name),
@@ -1761,7 +1954,7 @@
     state() {
       if (this.role === "new") return { role: "new", children: [], bot_link: "", teacher_pending: false };
       if (this.role === "teacher") return { role: "teacher", children: [], bot_link: "" };
-      if (this.role === "parent") return { role: "parent", children: [{ id: 1, name: "Маша", grade: 5 }], bot_link: "" };
+      if (this.role === "parent") return { role: "parent", children: [{ id: 1, name: "Маша", grade: 5 }], bot_link: "", alerts: this.alertsOn };
       return this.studentState();
     },
     studentState() {
@@ -1771,7 +1964,7 @@
       const days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
       const todayIdx = (new Date().getDay() + 6) % 7;
       return {
-        role: "student", bot_link: "", children: [], name: "Маша", grade: 5, voice: "button", mode: "coach", mode_name: "Тренер 💪",
+        role: "student", bot_link: "", children: [], name: "Маша", grade: 5, goal: this.fam.goal, voice: "button", mode: "coach", mode_name: "Тренер 💪",
         points: 640, unit: "⚡", level: "Знаток", to_next: 360, streak: 4, week_goal: 15, week_done: 11,
         week: days.map((_, i) => {
           const day = days[(todayIdx + 1 + i) % 7];
@@ -1804,6 +1997,16 @@
       };
     },
     chestOpened: false,
+    alertsOn: true,
+    fam: {
+      goal: { target: 15, prize: "поход в кино", solved: 11, left: 4, done: false, days_left: 3 }, goal_choices: [5, 10, 15, 20, 30],
+      weeks: [{ label: "13.10–19.10", solved: 9, accuracy: 67 }, { label: "20.10–26.10", solved: 14, accuracy: 71 }, { label: "27.10–02.11", solved: 12, accuracy: 75 }, { label: "03.11–09.11", solved: 21, accuracy: 81 }],
+      help_topics: [{ subject_id: "math", subject: "Математика", topic: "Обыкновенные дроби" }],
+      praises: ["👏 Молодец!", "💪 Горжусь тобой!", "🌟 Ты супер!"], praised_today: false, alerts: true,
+    },
+    parentView() {
+      return Object.assign(this.studentState(), { role: "parent_view", family: this.fam, goal: this.fam.goal });
+    },
     zapQuestion(mode) {
       if (mode === "eng") {
         const words = [["cat", "кошка"], ["dog", "собака"], ["house", "дом"], ["sun", "солнце"], ["book", "книга"], ["water", "вода"], ["friend", "друг"], ["school", "школа"]];
@@ -1827,7 +2030,17 @@
     schedule: { "0": ["math", "rus", "eng"], "1": ["lit", "hist", "math"], "2": ["bio", "rus", "inf"] },
     async call(path, body) {
       await new Promise((r) => setTimeout(r, path.includes("train/start") ? 1200 : 150));
-      if (path.startsWith("/api/state")) return this.state();
+      if (path.startsWith("/api/state")) return path.includes("child=") ? this.parentView() : this.state();
+      if (path === "/api/parent/praise") { this.fam.praised_today = true; return { note: `✅ Отправил: Маша получит «${this.fam.praises[body.phrase || 0]}» и +30 ⚡.`, family: this.fam }; }
+      if (path === "/api/parent/goal") { this.fam.goal = body.target ? { target: body.target, prize: body.prize || "", solved: 11, left: Math.max(0, body.target - 11), done: body.target <= 11, days_left: 3 } : null; return { family: this.fam }; }
+      if (path === "/api/parent/help") return { text: "Проценты — это сотые доли числа.\nПример из жизни: скидка 10% на игрушку за 500 ₽ — это 50 ₽.\nСпросите: сколько будет 50% от 20? (10)\nЧастая ошибка: делить на 10 вместо 100.\nХвалите за попытку, а не только за ответ. (демо)" };
+      if (path === "/api/parent/alerts") { this.alertsOn = !this.alertsOn; return { alerts: this.alertsOn }; }
+      if (path === "/api/teacher/quick") return { aid: "4", topic: "Сложение дробей" };
+      if (path === "/api/teacher/due") return { due: "2026-11-06" };
+      if (path === "/api/teacher/cert") return { note: "🏅 Грамота отправлена (демо)" };
+      if (path === "/api/teacher/announce") return { students: 24, parents: body.parents ? 19 : 0 };
+      if (path === "/api/teacher/stars") return { sent: 24 };
+      if (path === "/api/teacher/export") return { note: "📥 Таблица Excel отправлена вам в чат с Маячком (демо)" };
       if (path === "/api/onboarding") return { consent_text: "🔒 Прежде чем начать — о твоих данных.\n\nЯ сохраняю имя, класс и ответы — только для учёбы. Если тебе меньше 14 лет — согласие даёт родитель.", grades: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] };
       if (path === "/api/onboard/student") { this.role = "student"; return { ok: true }; }
       if (path === "/api/onboard/parent") { if (body.code !== "123456") throw new Error("Код не подошёл (в демо — 123456)"); this.role = "parent"; return { ok: true }; }
@@ -1853,7 +2066,13 @@
         students: [["Маша", 6, 31, 4.6, 1], ["Даня", 4, 18, 4.0, 2], ["Ира", 7, 40, 4.8, 0], ["Тимур", 1, 3, null, 3]].map(([name, days, solved, avg_mark, weak], i) => ({ id: i + 1, name, days, solved, avg_mark, weak, streak: days })),
         weak: [{ subject_id: "math", subject: "Математика", topic: "Сложение дробей", count: 7 }, { subject_id: "math", subject: "Математика", topic: "Проценты", count: 4 }],
         subjects: [{ id: "math", title: "Математика", now: ["Обыкновенные дроби", "Сложение дробей"] }],
-        assignments: [{ id: "3", subject: "Математика", topic: "Сложение дробей", created: "2026-11-02", done: 19, photos: 15, avg_mark: 4.3 }] };
+        assignments: [{ id: "3", subject: "Математика", topic: "Сложение дробей", created: "2026-11-02", due: "2026-11-06", done: 19, photos: 15, avg_mark: 4.3 }],
+        today: [{ subject_id: "math", subject: "Математика", topic: "Вычитание обыкновенных дробей с одинаковыми знаменателями" }],
+        map: { topics: [["Сложение дробей"], ["Проценты"], ["Округление"], ["Деление"]].map(([topic]) => ({ subject_id: "math", subject: "Математика", topic })),
+          rows: [["Даня", ["learning", "weak", "known", null]], ["Ира", ["known", "known", "mastered", "learning"]], ["Маша", ["mastered", "learning", "known", "known"]], ["Тимур", ["weak", "weak", null, "learning"]]].map(([name, cells]) => ({ name, cells })) },
+        stars: { top: [{ id: 3, name: "Ира", days: 7, solved: 40, streak: 12 }, { id: 1, name: "Маша", days: 6, solved: 31, streak: 6 }, { id: 2, name: "Даня", days: 4, solved: 18, streak: 2 }],
+          streak: { name: "Ира", streak: 12 }, accurate: { name: "Маша", accuracy: 92 } },
+        cert_reasons: ["За старание", "За серию занятий", "За отличные оценки", "За большой прогресс", "За помощь классу"] };
       if (path.startsWith("/api/teacher/assignment")) return { id: "3", subject: "Математика", topic: "Сложение дробей",
         students: [{ id: 1, name: "Маша", done: true, mark: 5, right: 5, total: 5, photo: true, photo_checked: true }, { id: 2, name: "Даня", done: true, mark: 3, right: 3, total: 5, photo: false }, { id: 4, name: "Тимур", done: false }] };
       if (path.startsWith("/api/teacher/student")) return { report: "Маша, 5 класс\nЗанималась 6 дней из 7, решено 31 задание.\nОценки: 5, 5, 4.\nСтоит подтянуть: Сложение дробей." };

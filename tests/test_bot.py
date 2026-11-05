@@ -75,7 +75,11 @@ class FakeApi:
             limit = BUTTON_MAX if len(row) == 1 else (12 if len(row) == 2 else 8)
             if max(sizes) > limit or any(b["text"].endswith("…") for b in row):   # и ничего не обрезано
                 WIDE.append([b["text"] for b in row])
-        self.sent.append({"text": text, "keyboard": keyboard, "attachments": attachments}); return {}
+        self.sent.append({"text": text, "keyboard": keyboard, "attachments": attachments, "to": user_id or chat_id}); return {}
+    async def send_file(self, user_id, data, filename, text="", keyboard=None):
+        self.files_sent.append((user_id, filename, data))
+        self.sent.append({"text": text, "keyboard": keyboard, "attachments": [{"type": "file"}], "to": user_id}); return True
+    files_sent = []
     async def send_voice(self, chat_id, audio_bytes): self.voices += 1; return {}
     async def upload_image(self, *a, **k): return "TOK"
     files = {}
@@ -129,6 +133,9 @@ class FakeAI:
     async def explain_topic(self, grade, subject, topic, context=None, task=None, reference=None, detailed=False, textbook=None):
         calls.setdefault("explain", []).append((grade, subject, topic, task, detailed))
         calls.setdefault("explain_textbook", []).append(textbook); return f"ОБЪЯСНЕНИЕ {topic}"
+    async def parent_help(self, grade, subject, topic):
+        calls.setdefault("phelp", []).append((grade, subject, topic))
+        return f"СОВЕТ РОДИТЕЛЮ: {topic}. Спросите ребёнка, приведите пример из жизни и похвалите за старание."
     async def flashcards(self, grade, subject, topic, count=8):
         calls.setdefault("fc", []).append((grade, subject, topic))
         return [{"front": f"{topic}: вопрос {i}", "back": f"ответ {i}"} for i in range(1, 6)]
@@ -2224,6 +2231,176 @@ async def test_teacher():
     print("   Кабинет учителя: класс по коду, ученики и отчёты, слабые темы, задание классу и оценки, напоминание: OK")
 
 
+async def test_family_and_class_extras():
+    """Плюшки родителя (похвала, цель недели, «Как помочь дома», сигналы, сравнение недель) и учителя
+    (Excel, карта тем, тема урока одной кнопкой, срок сдачи, звёзды недели и грамоты, объявление)."""
+    import zipfile, io as _io
+    import app.services.progress as prog
+    from datetime import datetime as _dt, timezone as _tz
+    P, C, T = 9901, 9902, 9903
+    await say(C, "/start"); await say(C, "Дина"); await press(C, "grade_5")
+    await say(P, "/start"); await press(P, "parent_start"); fcode = redis.d[f"fcode_of_{P}"]
+    await say(C, f"/family {fcode}")
+    h = UserHandler(api, db, redis)
+    # отчёт — с кнопками похвалы, цели и помощи
+    out = await press(P, f"parent_rep_{C}")
+    assert ("👏 Похвалить", f"pr_praise_{C}") in btns(out) and ("💡 Как помочь дома", f"pr_help_{C}") in btns(out)
+    # 👏 похвала: ребёнку сообщение и бонус, второй раз за день — нельзя
+    pts = json.loads(db.rows[C].rewards or "{}").get("points", 0)
+    out = await press(P, f"pr_praise_{C}"); assert ("💪 Горжусь тобой!", f"pr_praisep_{C}_1") in btns(out)
+    n = len(api.sent); out = await press(P, f"pr_praisep_{C}_1")
+    assert "✅ Отправил: Дина получит «💪 Горжусь тобой!»" in last(out)
+    assert any(m["to"] == C and "Горжусь тобой" in m["text"] for m in api.sent[n:])
+    assert json.loads(db.rows[C].rewards)["points"] == pts + 3
+    out = await press(P, f"pr_praisep_{C}_0"); assert "Сегодня вы уже хвалили" in last(out)
+    out = await press(9999, f"pr_praise_{C}"); assert "Подключим вас" in last(out)          # чужой родитель
+    # 🎯 цель недели: 5 заданий, награда — текстом; ребёнок узнаёт, видит в меню; выполнил — оба получают поздравление
+    out = await press(P, f"pr_goal_{C}"); assert "Цель пока не задана" in last(out) and ("5", f"pr_goalt_{C}_5") in btns(out)
+    out = await press(P, f"pr_goalt_{C}_5"); assert "Какая будет награда" in last(out)
+    n = len(api.sent); out = await say(P, "поход в кино")
+    assert "✅ Цель поставлена" in last(out) and "награда «поход в кино»" in last(out)
+    assert any(m["to"] == C and "Родитель поставил цель недели: решить 5 заданий" in m["text"] for m in api.sent[n:])
+    out = await say(C, "/start"); assert "🎯 Цель недели: 0 из 5 · до награды «поход в кино» — ещё 5" in out[-1]["text"]
+    for i in range(4):
+        await h._count_solved(C, 1)
+    assert not (await h.goal_state(C))["done"]
+    n = len(api.sent); note = await h._count_solved(C, 1)
+    assert "Цель недели выполнена! Награда от родителя: «поход в кино»" in note
+    assert any(m["to"] == P and "Дина выполнил(а) цель недели: 5 заданий" in m["text"] for m in api.sent[n:])
+    n = len(api.sent); await h._count_solved(C, 1); assert not any(m["to"] == P for m in api.sent[n:])   # один раз
+    out = await press(P, f"parent_rep_{C}"); t = "\n".join(m["text"] for m in out)
+    assert "🎯 Цель недели выполнена" in t and "📈 По сравнению с прошлой неделей: решено 6 (было 0) ↑" in t, t
+    out = await press(P, f"pr_goalt_{C}_10"); out = await press(P, f"pr_goalp_{C}")                    # без награды
+    assert "Сейчас: 10 заданий за неделю." in last(out) and "осталось 4" in last(out)
+    out = await press(P, f"pr_goaldel_{C}"); assert "Цель убрана" in last(out) and f"goal_{C}" not in redis.d
+    # 💡 как помочь дома: слабые темы → совет от ИИ (второй раз — из памяти, без ИИ)
+    out = await press(P, f"pr_help_{C}"); assert "нет тем, которые нужно подтягивать" in last(out)
+    progress = await h._load_progress(C)
+    prog.mark_diagnostic(progress, 5, [{"topic": "Проценты", "subject_id": "math", "subject": "Математика", "status": "неверно"}])
+    await h._save_progress(C, progress)
+    out = await press(P, f"pr_help_{C}"); assert "1. Математика: Проценты" in last(out)
+    calls.pop("phelp", None)
+    out = await press(P, f"pr_helpt_{C}_0"); assert "СОВЕТ РОДИТЕЛЮ: Проценты" in last(out) and len(calls["phelp"]) == 1
+    out = await press(P, f"pr_helpt_{C}_0"); assert "СОВЕТ РОДИТЕЛЮ" in last(out) and len(calls["phelp"]) == 1
+    # 🔔 сигналы: две двойки подряд — сразу; 3 учебных дня без занятий — вечером один раз; можно выключить
+    n = len(api.sent)
+    await h._save_lesson_mark(C, 5, "math", "Дроби", 0, 5); await h._save_lesson_mark(C, 5, "math", "Проценты", 1, 5)
+    assert any(m["to"] == P and "две двойки подряд по предмету «Математика»" in m["text"] for m in api.sent[n:])
+    import app.services.daily as dr
+    prof = {"grade": 5, "tz_offset": 300, "parents": "[1]"}
+    assert dr.evening_check_due(prof, _dt(2026, 11, 5, 14, 2, tzinfo=_tz.utc), 19)              # 19:02 по Екб
+    assert not dr.evening_check_due(prof, _dt(2026, 11, 5, 14, 7, tzinfo=_tz.utc), 19)
+    await h._save_profile(C, last_study_date="2026-10-29")
+    n = len(api.sent); await UserHandler(api, db, redis).run_scheduled(msg(C), "family_check")
+    assert any(m["to"] == P and "не занимается уже" in m["text"] for m in api.sent[n:])
+    n = len(api.sent); await UserHandler(api, db, redis).run_scheduled(msg(C), "family_check")
+    assert not api.sent[n:]                                                                       # повторно не пишем
+    out = await press(P, "pr_alerts"); assert "Сигналы выключены" in out[-1]["text"] and ("🔔 Сигналы: выкл", "pr_alerts") in btns(out)
+    n = len(api.sent); await h._save_lesson_mark(C, 5, "math", "Дроби", 0, 5)
+    assert not any(m["to"] == P for m in api.sent[n:])
+    await press(P, "pr_alerts")
+    weeks = await h.child_weeks(C); assert len(weeks) == 4 and weeks[-1]["solved"] >= 6
+    print("   Родитель: похвала, цель недели с наградой, «Как помочь дома», сигналы, сравнение недель: OK")
+
+    # ---------- учитель ----------
+    await say(ADMIN, f"/add_teacher {T}")
+    await say(T, "/teacher"); await press(T, "t_kind_subject"); await press(T, "t_subj_math"); await press(T, "t_subj_done")
+    await say(T, "Ирина Олеговна")
+    await press(T, "t_new"); await press(T, "t_new_5"); out = await press(T, "t_name_5_5А")
+    code = json.loads(redis.d[f"tclasses_{T}"])[0]
+    S2 = 9904
+    await say(S2, "/start"); await say(S2, "Боря"); await press(S2, "grade_5")
+    await say(C, f"/join {code}"); await say(S2, f"/join {code}")
+    out = await press(T, f"t_cls_{code}")
+    assert ("🗺 Карта тем", f"tx_map_{code}") in btns(out) and ("📥 Excel", f"tx_xls_{code}") in btns(out)
+    quick = [p for _, p in btns(out) if p.startswith("tx_qa_")]
+    assert quick and "⚡ Сегодня по программе (Математика)" in last(out)
+    # ⚡ тема урока одной кнопкой → задание; сразу предлагаем срок
+    n = len(api.sent); out = await press(T, quick[0])
+    assert "✅ Задание отправлено ученикам: 2" in last(out) and ("⏰ Пятница", f"tx_due_{code}_1_f") in btns(out)
+    task = json.loads(redis.d[f"tclass_{code}"])["assignments"][0]
+    assert task["topic"] == (await h.today_topics(json.loads(redis.d[f"tclass_{code}"]), T))[0]["topic"]
+    # ⏰ срок завтра: ученикам — дата; вечером накануне — напоминание; после срока — итог учителю
+    n = len(api.sent); out = await press(T, f"tx_due_{code}_1_d"); assert "⏰ Срок: до" in last(out)
+    assert sum(1 for m in api.sent[n:] if m["text"].startswith("⏰ Задание «")) == 2
+    n = len(api.sent); await UserHandler(api, db, redis).run_scheduled(msg(C), "class_check")
+    assert any(m["to"] == C and "Завтра срок задания учителя" in m["text"] for m in api.sent[n:])
+    n = len(api.sent); await UserHandler(api, db, redis).run_scheduled(msg(C), "class_check"); assert not api.sent[n:]
+    data = json.loads(redis.d[f"tclass_{code}"]); data["assignments"][0]["due"] = "2026-01-01"
+    data["assignments"][0]["results"][str(S2)] = {"right": 4, "total": 5, "mark": 4}
+    redis.d[f"tclass_{code}"] = json.dumps(data, ensure_ascii=False)
+    import app.services.progress as _pr
+    old_now = _pr.now; _pr.now = lambda: _dt(2026, 1, 3, 10, 0, tzinfo=_tz.utc)
+    try:
+        n = len(api.sent); await UserHandler(api, db, redis).run_scheduled(msg(C), "class_check")
+    finally:
+        _pr.now = old_now
+    got = [m for m in api.sent[n:] if m["to"] == T]
+    assert got and "закончился" in got[0]["text"] and "Выполнили: 1 из 2, средняя оценка 4.0" in got[0]["text"] and "Не сделали: Дина" in got[0]["text"]
+    # 🗺 карта тем
+    out = await press(T, f"tx_map_{code}"); assert "«Проценты» (Математика): 🟢 0 · 🟠 0 · 🔴 1 — Дина" in last(out), last(out)
+    m = await h.class_map(json.loads(redis.d[f"tclass_{code}"]), T)
+    assert m["topics"][0]["topic"] == "Проценты" and [r["name"] for r in m["rows"]] == ["Боря", "Дина"] and m["rows"][1]["cells"][0] == "weak"
+    # 📥 Excel: файл в чат учителю, три листа, оценки
+    api.files_sent.clear(); out = await press(T, f"tx_xls_{code}")
+    uid_, fname, body = api.files_sent[-1]; assert uid_ == T and fname.endswith(".xlsx") and "Таблица Excel" in last(out)
+    z = zipfile.ZipFile(_io.BytesIO(body)); sheet1 = z.read("xl/worksheets/sheet1.xml").decode()
+    assert "Боря" in sheet1 and "<v>4</v>" in sheet1 and len([n for n in z.namelist() if "worksheets/sheet" in n]) == 3
+    # ⭐ звёзды недели, поздравить класс, грамота
+    out = await press(T, f"tx_star_{code}"); assert "🥇 Дина" in last(out) and ("🏅 Дина", f"tx_cert_{code}_{C}") in btns(out)
+    n = len(api.sent); out = await press(T, f"tx_stsend_{code}"); assert "Звёзды недели отправлены ученикам: 2" in last(out)
+    out = await press(T, f"tx_cert_{code}_{C}"); assert ("🏅 За старание", f"tx_certr_{code}_{C}_0") in btns(out)
+    n = len(api.sent); out = await press(T, f"tx_certr_{code}_{C}_1"); assert "Грамота «За серию занятий» отправлена: Дина" in last(out)
+    assert any(m["to"] == C and "вручает тебе грамоту «За серию занятий»" in m["text"] for m in api.sent[n:])
+    out = await press(T, f"tx_certr_{code}_9999_1"); assert "Кабинет учителя" in last(out)        # не из класса
+    # 📢 объявление: текст → кому → ученикам и родителям
+    out = await press(T, f"tx_ann_{code}"); assert "Напишите текст" in last(out)
+    out = await say(T, "Завтра контрольная по дробям!"); assert ("👥 + 👨‍👩‍👧 Ещё и родителям", f"tx_annsend_{code}_p") in btns(out)
+    n = len(api.sent); out = await press(T, f"tx_annsend_{code}_p")
+    assert "ученикам — 2, родителям — 1" in last(out)
+    sent = [m for m in api.sent[n:] if m["text"].startswith("📢 Объявление от учителя — Ирина Олеговна (5А)")]
+    assert {m["to"] for m in sent} == {C, S2, P}
+    out = await press(X := 9905, f"tx_xls_{code}"); assert "Кабинет учителя" in last(out)        # не учитель
+    # ---------- то же в мини-приложении ----------
+    from contextlib import asynccontextmanager
+    from app.webapp.api import ApiError, MiniAppAPI
+    @asynccontextmanager
+    async def session_factory():
+        yield db
+    A = MiniAppAPI(lambda session: UserHandler(api, session, redis), session_factory, "mayachok_bot")
+    async def fails(coro, status=400):
+        try: await coro; assert False, "ожидалась ошибка"
+        except ApiError as e: assert e.status == status, (e.status, e.message); return e
+    st = await A.state(P, child=C); fam = st["family"]
+    assert fam["praised_today"] and len(fam["weeks"]) == 4 and fam["help_topics"][0]["topic"] == "Проценты" and fam["alerts"]
+    r = await A.parent_praise(P, C, 0); assert "Сегодня вы уже хвалили" in r["note"]
+    r = await A.parent_goal(P, C, 15, "мороженое"); assert r["family"]["goal"]["target"] == 15 and r["family"]["goal"]["prize"] == "мороженое"
+    assert (await A.state(C))["goal"]["target"] == 15
+    await fails(A.parent_goal(P, C, 7, "")); await fails(A.parent_goal(9999, C, 5, ""), 403)
+    r = await A.parent_goal(P, C, 0, ""); assert r["family"]["goal"] is None
+    r = await A.parent_help(P, C, 0); assert r["topic"] == "Проценты" and "СОВЕТ РОДИТЕЛЮ" in r["text"]
+    await fails(A.parent_help(P, C, 9), 404)
+    assert (await A.parent_alerts(P))["alerts"] is False and (await A.parent_alerts(P))["alerts"] is True
+    assert (await A.state(P))["alerts"] is True
+    cls = await A.teacher_class(T, code)
+    assert cls["today"] and cls["map"]["topics"][0]["topic"] == "Проценты" and cls["stars"]["top"][0]["name"] == "Дина" and cls["cert_reasons"]
+    r = await A.teacher_quick(T, code, cls["today"][0]["subject_id"]); assert r["aid"] == "2"
+    assert (await A.teacher_due(T, code, "2", "w"))["due"]
+    assert (await A.teacher_class(T, code))["assignments"][0]["due"]
+    await fails(A.teacher_due(T, code, "2", "x")); await fails(A.teacher_due(T, code, "99", "d"), 404)
+    r = await A.teacher_assign(T, code, "math", "Деление дробей", "f"); assert r["note"].startswith("✅ Задание отправлено")
+    assert (await A.teacher_class(T, code))["assignments"][0]["due"]
+    assert "отправлена: Дина" in (await A.teacher_cert(T, code, C, 0))["note"]
+    await fails(A.teacher_cert(T, code, 1, 0))
+    r = await A.teacher_announce(T, code, "Экскурсия в пятницу", True); assert r == {"students": 2, "parents": 1}
+    await fails(A.teacher_announce(T, code, "  ", False))
+    assert (await A.teacher_stars_send(T, code))["sent"] == 2
+    api.files_sent.clear(); r = await A.teacher_export(T, code); assert "отправлена" in r["note"] and api.files_sent[-1][0] == T
+    await fails(A.teacher_export(9999, code), 404)
+    assert not WIDE, sorted({tuple(r) for r in WIDE})
+    print("   Учитель: тема урока одной кнопкой, срок и автонапоминание, карта тем, Excel, звёзды и грамоты, объявление: OK")
+
+
 async def test_lighthouse():
     """«🗼 Мой маяк»: серия, заморозка раз в неделю, этапы стройки и картинка маяка."""
     from datetime import date
@@ -2719,6 +2896,7 @@ asyncio.run(test_miniapp_account())
 asyncio.run(test_savings())
 asyncio.run(test_consent())
 asyncio.run(test_teacher())
+asyncio.run(test_family_and_class_extras())
 asyncio.run(test_lighthouse())
 asyncio.run(test_chest())
 asyncio.run(test_lightning())

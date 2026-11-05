@@ -262,6 +262,6 @@ class CoreMixin:
             await self.redis.delete_state(f"awaiting_name_{user_id}")
         for key in ("awaiting_topic", "awaiting_exam_subject", "task_active", "diag_mode", "renaming", "stest_mode", "awaiting_tz",
                     "awaiting_schedule", "awaiting_lesson_topic", "awaiting_textbook",
-                    "awaiting_homework", "awaiting_parent_code", "awaiting_parent_sched", "awaiting_family_code",
+                    "awaiting_homework", "awaiting_parent_code", "awaiting_parent_sched", "awaiting_family_code", "awaiting_goal_prize", "awaiting_tann",
                     "awaiting_tclass", "awaiting_tasg", "awaiting_join", "awaiting_tname", "awaiting_tlink", "awaiting_fc_topic"):
             await self.redis.delete_state(f"{key}_{user_id}")

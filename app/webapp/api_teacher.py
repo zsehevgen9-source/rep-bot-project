@@ -132,7 +132,8 @@ class TeacherAPIMixin:
                 res = list(task["results"].values())
                 assignments.append({
                     "id": task["id"], "subject": subject_title(data["grade"], task["subject_id"]), "topic": task["topic"],
-                    "created": task.get("created"), "done": len(res), "photos": sum(1 for r in res if r.get("photo")),
+                    "created": task.get("created"), "due": task.get("due"), "done": len(res),
+                    "photos": sum(1 for r in res if r.get("photo")),
                     "avg_mark": round(sum(r["mark"] for r in res) / len(res), 1) if res else None,
                 })
             return {
@@ -145,6 +146,7 @@ class TeacherAPIMixin:
                 "subjects": [{"id": sid, "title": title, "now": programs.current_topics(data["grade"], sid, today)[:4]}
                              for title, sid in SUBJECTS[data["grade"]] if sid in mine_subjects],
                 "assignments": assignments,
+                **(await self.class_extras(h, uid, data)),
             }
 
     async def teacher_student(self, uid: int, code: Any, student: Any) -> Dict[str, Any]:
@@ -157,7 +159,7 @@ class TeacherAPIMixin:
 
     # ---------- задания ----------
 
-    async def teacher_assign(self, uid: int, code: Any, subject_id: Any, topic: Any) -> Dict[str, Any]:
+    async def teacher_assign(self, uid: int, code: Any, subject_id: Any, topic: Any, due: Any = None) -> Dict[str, Any]:
         from app.webapp.api import ApiError
         async with self._handler() as h:
             data = await self._class_or_404(h, uid, code)
@@ -167,7 +169,12 @@ class TeacherAPIMixin:
             if not topic:
                 raise ApiError(400, "Напишите тему задания")
             await h.create_assignment(self._quiet(h, uid), data["code"], subject_id, topic)
-            return {"ok": True, "note": self._last_note(h, "")}
+            note = next((n for n in h.api.notes if n.startswith("✅ Задание")), self._last_note(h, ""))
+            if due:
+                mine = h._mine(await h._tclass(data["code"]), uid)
+                if mine:
+                    await h.set_due(uid, data["code"], mine[-1]["id"], str(due))
+            return {"ok": True, "note": note.split("\n")[0]}
 
     async def teacher_assignment(self, uid: int, code: Any, aid: Any) -> Dict[str, Any]:
         from app.webapp.api import ApiError
@@ -185,7 +192,7 @@ class TeacherAPIMixin:
                              "total": (r or {}).get("total"), "photo": bool(photo),
                              "photo_checked": bool(photo and photo.get("checked"))})
             return {"id": task["id"], "subject": subject_title(data["grade"], task["subject_id"]),
-                    "topic": task["topic"], "created": task.get("created"),
+                    "topic": task["topic"], "created": task.get("created"), "due": task.get("due"),
                     "students": sorted(rows, key=lambda r: (not r["done"], r["name"]))}
 
     async def teacher_remind(self, uid: int, code: Any, aid: Any) -> Dict[str, Any]:

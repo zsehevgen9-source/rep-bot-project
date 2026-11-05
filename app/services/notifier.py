@@ -21,6 +21,11 @@ async def notify_once(session_factory: Callable, make_handler: Callable, make_me
         actions = daily_rules.plan_actions(profile, now)
         if daily_rules.parent_report_due(profile, now):
             actions.append("parent_report")   # недельный отчёт родителям — в воскресенье вечером
+        if profile.get("parents") not in (None, "", "[]", []) and \
+                daily_rules.evening_check_due(profile, now, daily_rules.FAMILY_CHECK_HOUR):
+            actions.append("family_check")    # давно не занимался — сигнал родителю
+        if daily_rules.evening_check_due(profile, now, daily_rules.CLASS_CHECK_HOUR):
+            actions.append("class_check")     # сроки заданий учителя
         for action in actions:
             try:
                 async with session_factory() as session:

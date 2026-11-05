@@ -23,6 +23,8 @@ from app.handlers.tutor.demo import DemoMixin
 from app.handlers.tutor.homework import HomeworkMixin
 from app.handlers.tutor.lesson import LessonMixin
 from app.handlers.tutor.parents import ParentMixin
+from app.handlers.tutor.family import FamilyMixin
+from app.handlers.tutor.teacher_extra import TeacherExtrasMixin
 from app.handlers.tutor.program import ProgramMixin
 from app.handlers.tutor.schedule import ScheduleMixin
 from app.handlers.tutor.tasks import TasksMixin
@@ -33,7 +35,7 @@ from app.handlers.tutor.tutorial import KIDS_MAX_GRADE, TutorialMixin
 
 class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, DiagnosticMixin, DailyMixin, TutorialMixin,
                   RewardsMixin, VoiceAdminMixin, TimezoneMixin, ScheduleMixin, LessonMixin,
-                  ProgramMixin, HomeworkMixin, ParentMixin, DemoMixin, PrivacyMixin, TeacherMixin, LighthouseMixin, ChestMixin, LightningMixin, InterestsMixin, FlashcardsMixin, BaseHandler):
+                  ProgramMixin, HomeworkMixin, ParentMixin, FamilyMixin, DemoMixin, PrivacyMixin, TeacherMixin, TeacherExtrasMixin, LighthouseMixin, ChestMixin, LightningMixin, InterestsMixin, FlashcardsMixin, BaseHandler):
 
     async def handle_message(self, message: NormalizedMessage):
         # Голосовое сообщение: распознаём и дальше работаем с ним как с обычным текстом
@@ -266,6 +268,9 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
         if await self.redis.get_state(f"awaiting_family_code_{uid}") == "true":
             await self.join_family(message, text)
             return
+        if await self.redis.get_state(f"awaiting_tann_{uid}"):
+            await self.announce_text(message, text)
+            return
         if await self.redis.get_state(f"awaiting_join_{uid}") == "true":
             await self.join_class(message, text)
             return
@@ -292,6 +297,9 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
             return
 
         # Родитель вводит код или расписание за ребёнка
+        if await self.redis.get_state(f"awaiting_goal_prize_{uid}") == "true":
+            await self.goal_save_prize(message, text)
+            return
         if await self.redis.get_state(f"awaiting_parent_code_{uid}") == "true":
             await self.link_parent(message, text)
             return
@@ -564,6 +572,9 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
             elif payload == "parent_start":
                 await self.ask_parent_code(message)
 
+            elif payload.startswith("pr_") and await self._family_payload(message, payload):
+                pass
+
             elif payload == "parent_cancel":
                 if await self.cancel_parent(uid):
                     await self.ask_role(message)
@@ -805,6 +816,9 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
 
             elif payload == "voice_toggle":
                 await self.toggle_voice(message)
+
+            elif payload.startswith("tx_") and await self._teacher_payload(message, payload):
+                pass
 
             elif payload == "t_menu":
                 await self.show_teacher_menu(message)

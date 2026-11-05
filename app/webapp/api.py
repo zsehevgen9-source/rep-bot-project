@@ -28,6 +28,7 @@ from app.services.levels import LEVEL_NAMES
 from app.services.programs import programs
 from app.services.task_utils import normalize_answer
 from app.webapp.api_account import AccountMixin
+from app.webapp.api_extra import ExtrasAPIMixin
 from app.webapp.api_teacher import TeacherAPIMixin
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ class ApiError(Exception):
         self.status, self.message, self.code = status, message, code
 
 
-class MiniAppAPI(AccountMixin, TeacherAPIMixin):
+class MiniAppAPI(AccountMixin, TeacherAPIMixin, ExtrasAPIMixin):
     """handler_factory(session) → UserHandler; session_factory() → async-контекст с сессией базы."""
 
     def __init__(self, handler_factory: Callable, session_factory: Callable, bot_username: str = ""):
@@ -98,6 +99,11 @@ class MiniAppAPI(AccountMixin, TeacherAPIMixin):
             }
             if grade:
                 result.update(await self._student(h, target, grade, profile))
+                result["goal"] = await h.goal_state(target)
+            if child is not None:
+                result["family"] = await self.family_info(h, uid, child)
+            elif role == "parent":
+                result["alerts"] = await h.alerts_on(uid)
             return result
 
     async def _student(self, h, uid: int, grade: int, profile: Dict[str, Any]) -> Dict[str, Any]:

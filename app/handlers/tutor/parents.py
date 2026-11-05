@@ -262,9 +262,11 @@ class ParentMixin:
             rows.append([_btn(f"🗓 Расписание · {label}", f"parent_sch_{child_uid}")])
             rows.append([_btn(f"🚫 Отключить · {label}", f"parent_leave_{child_uid}")])
         rows.append([_btn("➕ Ещё ребёнок", "parent_start")])
+        rows.append([_btn("🔔 Сигналы: " + ("вкл" if await self.alerts_on(uid) else "выкл"), "pr_alerts")])
         text = (f"{note}\n\n" if note else "") + "👨‍👩‍👧 Родительский раздел\n\n" + "\n".join(lines) + (
-            "\n\n📊 — отчёт о занятиях, 🗓 — внести расписание уроков за ребёнка.\n"
-            "Отчёт за неделю я пришлю сам в воскресенье в 18:00.")
+            "\n\n📊 — отчёт о занятиях; там же 👏 похвала, 🎯 цель недели с наградой и 💡 как помочь дома.\n"
+            "🗓 — расписание уроков за ребёнка. Отчёт за неделю я пришлю сам в воскресенье в 18:00.\n"
+            "🔔 Сигналы — сразу напишу, если ребёнок 3 дня не занимается или получил две двойки подряд.")
         await self.answer(message, text, keyboard=_kb(rows))
 
     async def ask_leave_child(self, message: NormalizedMessage, child_uid: int) -> None:
@@ -304,7 +306,7 @@ class ParentMixin:
             return
         text = await self.build_parent_report(child_uid)
         await self._parent_card(message, child_uid)
-        await self.answer(message, text, keyboard=_kb([[_back("parent_menu")]]))
+        await self.answer(message, text, keyboard=_kb(self._family_rows(child_uid)))
 
     async def build_parent_report(self, child_uid: int) -> str:
         """Отчёт за последние 7 дней: занятия, оценки, слабые темы. Без ИИ — только факты."""
@@ -324,9 +326,15 @@ class ParentMixin:
                          f"с первой попытки: {first_try} ({round(100 * first_try / solved)}%).")
         else:
             lines.append("📅 На этой неделе занятий не было.")
+        compare = await self.weeks_compare_line(child_uid)
+        if compare:
+            lines.append(compare)
         streak = profile.get("streak_days") or 0
         if streak > 1:
             lines.append(f"🔥 Серия: {streak} учебных дней подряд.")
+        goal = await self.goal_line(child_uid)
+        if goal:
+            lines.append(goal.replace("🎯 Цель недели выполнена! 🎉", "🎯 Цель недели выполнена 🎉"))
         marks = [m for m in load_json(profile.get("lesson_marks"), []) if m.get("date") in week]
         if marks:
             lines.append("")

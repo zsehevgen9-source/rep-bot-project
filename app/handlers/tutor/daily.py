@@ -40,7 +40,7 @@ class DailyMixin:
             uid, activity=json.dumps(activity, ensure_ascii=False), streak_days=streak, last_study_date=today,
         )
         reward = await self._reward(uid, "first_try" if first_try else "hinted", attempt=attempt)
-        note = await self._lighthouse_note(uid) + await self._chest_note(uid)
+        note = await self._lighthouse_note(uid) + await self._chest_note(uid) + await self._goal_check(uid)
         return (reward + note) if reward else (f"\n{note}" if note else "")
 
     # ---------- план на день ----------
@@ -304,6 +304,10 @@ class DailyMixin:
             await self._save_profile(message.user_id, last_report_date=today)
         elif action == "parent_report":
             await self.send_parent_report(message)
+        elif action == "family_check":
+            await self.family_check(message)
+        elif action == "class_check":
+            await self.class_check(message)
 
     # ---------- настройки уведомлений ----------
 

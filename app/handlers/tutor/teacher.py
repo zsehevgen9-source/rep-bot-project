@@ -347,7 +347,8 @@ class TeacherMixin:
                 f"Ученик пишет боту: /join {code}\n"
                 "(или «⚙️ Настройки → 🏫 Учитель» и вводит код).")
 
-    async def show_class(self, message: NormalizedMessage, code: str, note: str = "") -> None:
+    async def show_class(self, message: NormalizedMessage, code: str, note: str = "",
+                         extra: Optional[List[List[Dict[str, str]]]] = None) -> None:
         data = await self._own_tclass(message.user_id, code)
         if not data:
             await self.show_teacher_menu(message)
@@ -370,13 +371,16 @@ class TeacherMixin:
             last = mine[-1]
             lines.append(f"Последнее задание: {subject_title(data['grade'], last['subject_id'])}, «{last['topic']}» — "
                          f"выполнили {len(last['results'])} из {len(stats)}")
+        quick = await self.quick_lines(data, message.user_id)
+        if quick:
+            lines += [""] + quick
         if not stats:
             lines += ["", self._join_hint(code)]
-        rows = [
-            [_btn("👥 Ученики", f"t_stu_{code}")],
-            [_btn("🎯 Слабые темы класса", f"t_weak_{code}")],
-            [_btn("📝 Задание классу", f"t_asg_{code}")],
-            [_btn("📊 Результаты заданий", f"t_res_{code}")],
+        rows = list(extra or []) + await self.quick_rows(data, message.user_id) + [
+            [_btn("👥 Ученики", f"t_stu_{code}"), _btn("🎯 Слабые", f"t_weak_{code}")],
+            [_btn("📝 Задать", f"t_asg_{code}"), _btn("📊 Итоги", f"t_res_{code}")],
+            [_btn("🗺 Карта тем", f"tx_map_{code}"), _btn("⭐ Звёзды", f"tx_star_{code}")],
+            [_btn("📢 Объявить", f"tx_ann_{code}"), _btn("📥 Excel", f"tx_xls_{code}")],
             [_btn("🔑 Код", f"t_code_{code}"),
              _btn("🗑 Удалить", f"t_del_{code}") if data.get("owner") == message.user_id else _btn("🚪 Выйти", f"t_unlink_{code}")],
             [_back("t_menu")],
@@ -420,7 +424,8 @@ class TeacherMixin:
             await self.show_teacher_menu(message)
             return
         text = await self.build_parent_report(student)
-        await self._quiet(message, text, keyboard=_kb([[_back(f"t_stu_{code}")]]))
+        await self._quiet(message, text, keyboard=_kb([[_btn("🏅 Грамота", f"tx_cert_{code}_{student}")],
+                                                       [_back(f"t_stu_{code}")]]))
 
     async def show_class_weak(self, message: NormalizedMessage, code: str) -> None:
         data = await self._own_tclass(message.user_id, code)
@@ -530,7 +535,8 @@ class TeacherMixin:
             except Exception as e:
                 logger.warning("Не удалось отправить задание ученику %s: %s", student, e)
         await self.show_class(message, code, note=f"✅ Задание отправлено ученикам: {sent}. "
-                                                  "Результаты — в «📊 Результаты заданий».")
+                                                  "Результаты — в «📊 Итоги».\n⏰ Поставить срок сдачи?",
+                              extra=self.due_rows(code, aid))
 
     async def start_assignment(self, message: NormalizedMessage, code: str, aid: str) -> None:
         """Ученик нажал «📝 Начать задание»: тест по теме (как задания на оценку после урока)."""
@@ -670,7 +676,8 @@ class TeacherMixin:
         if not data or not task:
             await self.show_teacher_menu(message)
             return
-        lines = [f"📊 Задание {aid}: {subject_title(data['grade'], task['subject_id'])}, «{task['topic']}»", ""]
+        lines = [f"📊 Задание {aid}: {subject_title(data['grade'], task['subject_id'])}, «{task['topic']}»"
+                 + (f" · срок до {task['due'][8:10]}.{task['due'][5:7]}" if task.get("due") else ""), ""]
         not_done, no_photo, photo_btns = [], [], []
         for student in data["students"]:
             name = (await self._student_week(student))["name"]

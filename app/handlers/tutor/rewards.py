@@ -79,7 +79,9 @@ class RewardsMixin:
         title = load_json(await self.redis.get_state(f"chest_{uid}"), {}).get("title")
         if title:
             status = f"{status} · 🏅 {title}" if status else f"🏅 {title}"
-        return f"{rewards_rules.MODE_NAMES[mode]} · {status}" if status else ""
+        line = f"{rewards_rules.MODE_NAMES[mode]} · {status}" if status else ""
+        goal = await self.goal_line(uid)
+        return f"{line}\n{goal}" if line and goal else (line or goal)
 
     async def show_rewards(self, message: NormalizedMessage, grade: int) -> None:
         uid = message.user_id

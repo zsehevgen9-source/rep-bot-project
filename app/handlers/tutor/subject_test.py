@@ -449,6 +449,8 @@ class SubjectTestMixin:
         today = daily_rules.local_now(topic_progress.now(), profile.get("tz_offset")).date().isoformat()
         marks.append({"date": today, "grade": grade, "subject_id": subject_id, "topic": topic, "mark": mark})
         await self._save_profile(uid, lesson_marks=json.dumps(marks[-200:], ensure_ascii=False))
+        if mark == 2:
+            await self._mark_alert(uid, subject_id)
         words = {5: "Отлично! 🌟", 4: "Хорошо! 👍", 3: "Удовлетворительно. Тему стоит повторить.",
                  2: "Пока не получилось — давай разберём ошибки и попробуем ещё раз."}
         return f"📒 Оценка за урок «{topic}»: {mark}. {words[mark]}"
@@ -464,7 +466,7 @@ class SubjectTestMixin:
         await self._save_profile(uid, activity=json.dumps(activity, ensure_ascii=False), streak_days=streak,
                                  last_study_date=today_date.isoformat())
         reward = await self._reward(uid, "first_try", times=right)
-        note = await self._lighthouse_note(uid) + await self._chest_note(uid)
+        note = await self._lighthouse_note(uid) + await self._chest_note(uid) + await self._goal_check(uid)
         return (reward + note) if reward else (f"\n{note}" if note else "")
 
     async def fix_test_question(self, message: NormalizedMessage, n: int) -> None:

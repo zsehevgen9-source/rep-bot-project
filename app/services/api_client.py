@@ -183,6 +183,35 @@ class MaxApiClient:
             logger.error("Ошибка в upload_image: %s", e)
             return None
 
+    async def send_file(self, user_id: int, data: bytes, filename: str, text: str = "",
+                        keyboard: Optional[Dict[str, Any]] = None) -> bool:
+        """Файл (например, таблица Excel) отдельным сообщением. False — если загрузить не удалось."""
+        try:
+            upload_info = await self._request("POST", "uploads", params={"type": "file"})
+            upload_url = upload_info.get("url")
+            if not upload_url:
+                logger.error("MAX не выдал URL для загрузки файла: %s", upload_info)
+                return False
+            form = aiohttp.FormData()
+            form.add_field("data", data, filename=filename, content_type="application/octet-stream")
+            session = await self._get_session()
+            async with session.post(upload_url, data=form, headers={"Authorization": self.token}, ssl=self._ssl) as response:
+                raw = await response.text()
+                if response.status != 200:
+                    logger.error("Ошибка загрузки файла в MAX: %s - %s", response.status, raw[:300])
+                    return False
+            answer = json.loads(raw) if raw and raw.strip().startswith("{") else {}
+            token = answer.get("token") or upload_info.get("token")
+            if not token:
+                logger.error("В ответе MAX нет токена файла: %s", raw[:300])
+                return False
+            await self.send_message(user_id=user_id, text=text, keyboard=keyboard,
+                                    attachments=[{"type": "file", "payload": {"token": token}}])
+            return True
+        except Exception as e:
+            logger.error("Ошибка в send_file: %s", e)
+            return False
+
     async def send_action(self, chat_id: int, action: str = "typing_on") -> None:
         """Действие в чате: «печатает…» (typing_on). Ошибки не важны — это только подсказка для пользователя."""
         try:
