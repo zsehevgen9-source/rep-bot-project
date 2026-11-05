@@ -2797,6 +2797,12 @@ async def test_miniapp_account():
     cfg = await A.unlink_parent(U, P2); assert cfg["parents"] == []
     assert (await A.family_cancel(P2))["ok"] and (await A.state(P2))["role"] == "new"
     # 4) Учитель: запрос → кабинет сразу, профиль, класс, ученик вступает, задание, результаты, напоминание
+    AD = 9869; settings.admin_ids = {ADMIN, AD}                                             # второй администратор, не ученик
+    try:
+        assert (await A.state(AD))["role"] == "new"
+        r = await A.teacher_request(AD); assert r["teacher"] and (await A.state(AD))["role"] == "teacher"   # «Я учитель» и у админа
+    finally:
+        settings.admin_ids = {ADMIN}
     T = 9863
     r = await A.teacher_request(T); assert r["teacher"] and (await A.state(T))["role"] == "teacher"
     home = await A.teacher_home(T); assert home["profile"]["kind"] is None and home["classes"] == []

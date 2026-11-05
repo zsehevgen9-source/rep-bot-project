@@ -78,16 +78,20 @@ class PrivacyMixin:
         уведомление. Это безопасно: учитель видит лишь тех учеников, кто сам вступил в его класс по коду.
         TEACHER_APPROVAL=true — кабинет откроется после кнопки «✅ Открыть» у администратора."""
         uid = message.user_id
-        if await self._is_teacher(uid):
+        if await self._is_teacher(uid, explicit=True):
             await self.show_teacher_menu(message)
             return
         admins = sorted(settings.admin_ids)
-        if not getattr(settings, "TEACHER_APPROVAL", False):
+        # Администратор, выбравший «Я учитель», становится учителем «по-настоящему»: иначе приложение
+        # не узнает в нём учителя (там кабинет открывается только явным учителям) и снова покажет выбор роли
+        if not getattr(settings, "TEACHER_APPROVAL", False) or uid in admins:
             teachers = load_json(await self.redis.get_state("teachers"), [])
             if uid not in teachers:
                 teachers.append(uid)
                 await self.redis.set_state("teachers", json.dumps(teachers))
             for admin in admins:
+                if admin == uid:
+                    continue
                 try:
                     await self.api.send_message(
                         user_id=admin, text=f"👩‍🏫 Новый учитель в боте: пользователь {uid}. Ничего делать не нужно.\n"
