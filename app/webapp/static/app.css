@@ -504,3 +504,9 @@ body.no-scroll { overflow: hidden; }
 .guide-dots i { width: 8px; height: 8px; border-radius: 4px; background: var(--line); transition: width .2s; }
 .guide-dots i.on { width: 22px; background: var(--indigo); }
 .guide-nav { margin-top: 10px; }
+.guide-say {
+  margin-top: 10px; padding: 8px 16px; border-radius: 14px; background: var(--card); color: var(--indigo);
+  font-weight: 800; box-shadow: var(--shadow);
+}
+.guide-say.busy { opacity: .6; }
+.guide-say.pulse { background: var(--indigo); color: #fff; animation: pulse 1.2s ease-in-out infinite; }

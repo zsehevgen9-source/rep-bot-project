@@ -499,8 +499,11 @@
     const slides = guideSlides(kind);
     let i = 0;
     const prevBack = S.back;
+    // 1–2 класс: читать ещё трудно — Маячок сам озвучивает каждую страницу гайда
+    const young = kind === "student" && S.data && (S.data.grade || 0) <= 2 && S.data.voice !== "off";
+    const voiceOk = !S.data || S.data.voice !== "off";
     const box = el("div", { class: "guide", role: "dialog", "aria-label": "Как пользоваться" });
-    const close = () => { guideMark(kind); box.remove(); document.body.classList.remove("no-scroll"); setBack(prevBack); };
+    const close = () => { stopVoice(); guideMark(kind); box.remove(); document.body.classList.remove("no-scroll"); setBack(prevBack); };
     const step = (delta) => { const n = i + delta; if (n < 0) return; if (n >= slides.length) return close(); i = n; draw(); };
     function miniTabs(active) {
       const tabs = S.data ? tabsFor(S.data) : [];
@@ -508,9 +511,19 @@
       return el("div", { class: "guide-tabs" }, tabs.map(([id, ico, name]) =>
         el("span", { class: "guide-tab" + (id === active ? " on" : "") }, el("b", {}, ico), name)));
     }
+    // Значки, которые важны для смысла, Маячок называет словами (остальные эмодзи голос просто пропускает)
+    const SAY = [["📷 —", "Кнопка с фотоаппаратом:"], ["🎤 —", "Кнопка с микрофоном:"], ["🔊 у ответа —", "Кнопка с динамиком у ответа:"],
+      ["⚙️ вверху справа", "Шестерёнка вверху справа"], ["Кнопка ⚙️", "Кнопка с шестерёнкой"], ["кнопкой ❓", "кнопкой с вопросиком"],
+      ["нажми ■", "нажми квадратик"], ["🟢", "зелёный —"], ["🟠", "оранжевый —"], ["🔴", "красный —"], ["Маячок — чат", "Чат с Маячком"]];
+    const sayText = (s) => {
+      let t = [s.title, s.text, ...(s.points || []).filter(Boolean)].filter(Boolean).join(". ").replace(/([.!?])\s*\./g, "$1");
+      for (const [a, b] of SAY) t = t.split(a).join(b);
+      return t;
+    };
     function draw() {
       const s = slides[i];
       const last = i === slides.length - 1;
+      const sayBtn = voiceOk ? el("button", { class: "guide-say", onclick: (ev) => { ev.currentTarget.classList.remove("pulse"); speak(sayText(s), ev.currentTarget); } }, "🔊 Послушать") : null;
       box.replaceChildren(
         el("div", { class: "guide-top" },
           el("span", { class: "guide-count" }, `${i + 1} из ${slides.length}`),
@@ -518,6 +531,7 @@
         el("div", { class: "guide-body" },
           s.ico ? el("div", { class: "guide-ico" }, s.ico) : mascot(s.mood || "happy", "guide-mascot"),
           el("h2", {}, s.title),
+          sayBtn,
           s.text ? el("p", { class: "guide-text" }, s.text) : null,
           (s.points || []).filter(Boolean).length ? el("ul", { class: "guide-points" }, s.points.filter(Boolean).map((p) => el("li", {}, p))) : null,
           s.tab ? el("div", { class: "guide-where" }, el("div", { class: "label-s" }, "Где это: вкладка внизу экрана"), miniTabs(s.tab)) : null),
@@ -525,6 +539,11 @@
         el("div", { class: "btn-row guide-nav" },
           i > 0 ? el("button", { class: "btn secondary", onclick: () => step(-1) }, "← Назад") : null,
           el("button", { class: "btn", onclick: () => step(1) }, last ? "Понятно! 🚀" : "Дальше →")));
+      if (young) {
+        stopVoice();
+        // Первую страницу телефон может не дать озвучить без нажатия — тогда кнопка «🔊» мигает
+        speak(sayText(s)).then((ok) => { if (!ok && sayBtn && sayBtn.isConnected) sayBtn.classList.add("pulse"); });
+      }
     }
     let x0 = null;
     box.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; }, { passive: true });
@@ -1617,8 +1636,8 @@
 
   let player = null, playing = "";
   async function speak(text, button) {
-    if (player) { player.pause(); player = null; if (playing === text) { playing = ""; return; } }
-    if (DEMO) return toast("В демо-режиме голос не звучит — в MAX Маячок говорит голосом 🔊");
+    if (player) { player.pause(); player = null; if (playing === text) { playing = ""; return true; } }
+    if (DEMO) { if (button) toast("В демо-режиме голос не звучит — в MAX Маячок говорит голосом 🔊"); return false; }
     try {
       if (button) button.classList.add("busy");
       const response = await fetch(API_BASE + "/api/voice/say", {
@@ -1630,9 +1649,11 @@
       playing = text;
       player.onended = () => { URL.revokeObjectURL(url); player = null; playing = ""; };
       await player.play();
-    } catch (e) { if (button) toast(e.message); }
+      return true;
+    } catch (e) { if (button) toast(e.message); player = null; playing = ""; return false; }
     finally { if (button) button.classList.remove("busy"); }
   }
+  function stopVoice() { if (player) { player.pause(); player = null; playing = ""; } }
 
   let recorder = null;
   async function toggleMic(button) {
