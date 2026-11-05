@@ -87,7 +87,7 @@ class MiniAppAPI(AccountMixin, TeacherAPIMixin):
             elif await h._is_teacher(uid, explicit=True):
                 role = "teacher"
             else:
-                role = "parent" if kids else "new"
+                role = "parent" if kids or await h.redis.get_state(f"is_parent_{uid}") else "new"
             result: Dict[str, Any] = {
                 "role": role,
                 "teacher_pending": bool(await h.redis.get_state(f"teacher_req_{uid}")),

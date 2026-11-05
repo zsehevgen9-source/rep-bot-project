@@ -179,6 +179,28 @@ class AccountMixin:
             await h.show_parent_code(self._quiet(h, uid))       # тот же код, что в чате (действует сутки)
             return {"code": await h.redis.get_state(f"pcode_of_{uid}")}
 
+    async def family_code(self, uid: int) -> Dict[str, Any]:
+        """Код родителя для детей (7 дней). Ребёнок вводит его у себя — как код класса учителя."""
+        async with self._handler() as h:
+            return {"code": await h.family_code(uid)}
+
+    async def family_cancel(self, uid: int) -> Dict[str, Any]:
+        """«Я не родитель»: вернуться к выбору роли (только пока дети не подключены)."""
+        async with self._handler() as h:
+            return {"ok": await h.cancel_parent(uid)}
+
+    async def join_family(self, uid: int, code: Any) -> Dict[str, Any]:
+        """Ученик вводит код родителя. Родитель получает сообщение в чат."""
+        from app.webapp.api import ApiError
+        async with self._handler() as h:
+            digits = "".join(ch for ch in str(code or "") if ch.isdigit())
+            data = load_json(await h.redis.get_state(f"fcode_{digits}"), None) if len(digits) == 6 else None
+            await h.join_family(self._quiet(h, uid), digits)
+            parent = data.get("uid") if isinstance(data, dict) else None
+            if not parent or not await h._is_parent_of(parent, uid):
+                raise ApiError(400, self._last_note(h, "Код не подошёл"), "code")
+        return await self.settings(uid)
+
     async def unlink_parent(self, uid: int, parent_id: Any) -> Dict[str, Any]:
         async with self._handler() as h:
             if isinstance(parent_id, int):

@@ -1,8 +1,10 @@
 """Режим для родителя: подключение по коду, недельный отчёт, расписание за ребёнка.
 
-Ученик: «⚙️ Настройки → 👨‍👩‍👧 Родитель» — получает код из 6 цифр (действует сутки).
-Родитель: пишет боту /parent 123456 (или «👨‍👩‍👧 Я родитель» при первом входе) — и видит отчёт о ребёнке,
-может внести расписание. Каждое воскресенье в 18:00 родителю приходит отчёт за неделю.
+Основной способ (как ученик вступает в класс учителя): родитель нажимает «👨‍👩‍👧 Я родитель» и получает
+семейный код (6 цифр, действует 7 дней, подходит для нескольких детей). Ребёнок вводит его:
+«⚙️ Настройки → 👨‍👩‍👧 Родитель → 🔑 Ввести код родителя» или /family 123456.
+Запасной способ: ребёнок показывает свой код (сутки), родитель пишет боту /parent 123456.
+Родитель видит отчёт о ребёнке, может внести расписание. Каждое воскресенье в 18:00 родителю приходит отчёт за неделю.
 Ребёнок всегда видит, кто подключён, и может отключить родителя.
 """
 from datetime import timedelta
@@ -12,6 +14,7 @@ from app.services import cards
 from app.services import schedule as schedule_rules
 
 CODE_TTL = DAY
+FAMILY_TTL = 7 * DAY
 MAX_PARENTS = 3
 
 
@@ -43,16 +46,13 @@ class ParentMixin:
 
     # ---------- ученик: код для родителя ----------
 
-    async def show_parent_code(self, message: NormalizedMessage) -> None:
+    async def show_parent_code(self, message: NormalizedMessage, note: str = "") -> None:
         uid = message.user_id
-        code = await self.redis.get_state(f"pcode_of_{uid}")
-        if not code or await self.redis.get_state(f"pcode_{code}") != str(uid):
-            code = f"{random.randint(0, 999999):06d}"
-            await self.redis.set_state(f"pcode_{code}", str(uid), ex=CODE_TTL)
-            await self.redis.set_state(f"pcode_of_{uid}", code, ex=CODE_TTL)
+        code = await self._child_code(uid)
         parents = await self._parents_of(uid)
         grade = await self._get_grade(uid)
-        rows = [[_btn(f"🔕 Отключить {n}", f"parent_unlink_{p['user_id']}")] for n, p in enumerate(parents, 1)]
+        rows = [[_btn("🔑 Ввести код родителя", "fam_enter")]]
+        rows += [[_btn(f"🔕 Отключить {n}", f"parent_unlink_{p['user_id']}")] for n, p in enumerate(parents, 1)]
         if len(parents) > 1:
             rows.append([_btn("🔕 Отключить всех", "parent_unlink_all")])
         rows.append([_back(f"settings_{grade}" if grade else "back_to_menu")])
@@ -64,15 +64,75 @@ class ParentMixin:
             status = "Пока никто не подключён."
         await self._send_with_voice(
             message,
-            f"👨‍👩‍👧 Подключить родителя\n\nКод: {code}\n\n"
-            "Пусть мама или папа откроет этого бота в MAX и напишет:\n"
-            f"/parent {code}\n\n"
-            "Тогда родитель будет получать по воскресеньям короткий отчёт: сколько ты занимался, оценки за уроки "
-            "и какие темы стоит подтянуть. Код действует сутки.\n\n" + status,
+            f"{note}👨‍👩‍👧 Родители\n\n"
+            "Мама или папа нажимает в Маячке «👨‍👩‍👧 Я родитель» и получает код. "
+            "Нажми «🔑 Ввести код родителя» и напиши его — готово!\n\n"
+            f"Или наоборот: покажи родителю свой код. Код: {code}\n"
+            f"Родитель открывает этого бота в MAX и пишет: /parent {code}\n"
+            "(твой код действует сутки)\n\n"
+            "Родитель будет видеть, как ты занимаешься, и получать по воскресеньям короткий отчёт.\n\n" + status,
             keyboard=_kb(rows),
-            voice_text="Покажи код родителю. Пусть он откроет этого бота и напишет: parent и код. "
-                       "Тогда он будет получать отчёт о твоих занятиях.",
+            voice_text="Попроси маму или папу нажать в Маячке «Я родитель» — они получат код. "
+                       "Нажми «Ввести код родителя» и напиши его.",
         )
+
+    async def _child_code(self, uid: int) -> str:
+        code = await self.redis.get_state(f"pcode_of_{uid}")
+        if not code or await self.redis.get_state(f"pcode_{code}") != str(uid):
+            code = f"{random.randint(0, 999999):06d}"
+            await self.redis.set_state(f"pcode_{code}", str(uid), ex=CODE_TTL)
+            await self.redis.set_state(f"pcode_of_{uid}", code, ex=CODE_TTL)
+        return code
+
+    # ---------- ученик вводит код родителя (как код класса учителя) ----------
+
+    async def ask_family_code(self, message: NormalizedMessage) -> None:
+        uid = message.user_id
+        if not await self._get_grade(uid):
+            await self.show_parent_menu(message)
+            return
+        await self.redis.set_state(f"awaiting_family_code_{uid}", "true", ex=3600)
+        await self._quiet(message, "🔑 Напиши код родителя — 6 цифр.\n\n"
+                                   "Родитель видит его в Маячке, в разделе «👨‍👩‍👧 Я родитель».",
+                          keyboard=_kb([[_back("parent_code")]]))
+
+    async def join_family(self, message: NormalizedMessage, code: str) -> None:
+        """Ученик подключает родителя по семейному коду."""
+        uid = message.user_id
+        await self.redis.delete_state(f"awaiting_family_code_{uid}")
+        digits = "".join(ch for ch in code if ch.isdigit())
+        if not await self._get_grade(uid):
+            if await self._children_of(uid) or await self.redis.get_state(f"is_parent_{uid}"):
+                await self.show_parent_menu(message, note="🙂 Этот код вводит ребёнок на своём телефоне.")
+            else:
+                await self.answer(message, "Код родителя вводит ученик 🙂 Сначала зарегистрируйся: /start")
+            return
+        data = load_json(await self.redis.get_state(f"fcode_{digits}"), None) if len(digits) == 6 else None
+        parent_uid = data.get("uid") if isinstance(data, dict) else None
+        if not parent_uid or await self.redis.get_state(f"fcode_of_{parent_uid}") != digits:
+            await self.redis.set_state(f"awaiting_family_code_{uid}", "true", ex=3600)
+            await self._quiet(message, "Код не подошёл 🙈 Проверь цифры и напиши ещё раз. Свежий код родитель "
+                                       "найдёт в Маячке: «👨‍👩‍👧 Я родитель».",
+                              keyboard=_kb([[_back("parent_code")]]))
+            return
+        if parent_uid == uid:
+            await self.answer(message, "Это твой собственный код 🙂 Его вводит ребёнок на своём телефоне.")
+            return
+        await self._attach_parent(parent_uid, data.get("chat_id"), uid)
+        name = await self._child_name(uid)
+        await self.api.send_message(
+            user_id=parent_uid, text=f"✅ {name} подключил(а) вас к своим занятиям. "
+                                     "Отчёт можно открыть в родительском разделе, а за неделю я пришлю его сам в воскресенье.",
+            keyboard=_kb([[_btn("👨‍👩‍👧 Родительский раздел", "parent_menu")]]))
+        await self.show_parent_code(message, note="✅ Готово! Родитель подключён — он видит твои занятия.\n\n")
+
+    async def _attach_parent(self, parent_uid: int, parent_chat: Optional[int], child_uid: int) -> None:
+        parents = [p for p in await self._parents_of(child_uid) if p.get("user_id") != parent_uid]
+        since = topic_progress.now().strftime("%d.%m.%Y")
+        parents = (parents + [{"user_id": parent_uid, "chat_id": parent_chat, "since": since}])[-MAX_PARENTS:]
+        await self._save_profile(child_uid, parents=json.dumps(parents))
+        children = [c for c in await self._children_of(parent_uid) if c != child_uid] + [child_uid]
+        await self.redis.set_state(f"children_{parent_uid}", json.dumps(children), ex=GRADE_TTL)
 
     async def unlink_parent(self, message: NormalizedMessage, parent_uid: int) -> None:
         """Ученик отключает одного родителя."""
@@ -121,35 +181,65 @@ class ParentMixin:
 
     # ---------- родитель ----------
 
+    async def family_code(self, uid: int, chat_id: Optional[int] = None) -> str:
+        """Семейный код родителя (для детей): 6 цифр на 7 дней. Заодно запоминаем, что человек — родитель."""
+        code = await self.redis.get_state(f"fcode_of_{uid}")
+        data = load_json(await self.redis.get_state(f"fcode_{code}"), None) if code else None
+        if not isinstance(data, dict) or data.get("uid") != uid:
+            for _ in range(20):
+                code = f"{random.randint(0, 999999):06d}"
+                if not await self.redis.get_state(f"fcode_{code}"):
+                    break
+            await self.redis.set_state(f"fcode_{code}", json.dumps({"uid": uid, "chat_id": chat_id}), ex=FAMILY_TTL)
+            await self.redis.set_state(f"fcode_of_{uid}", code, ex=FAMILY_TTL)
+        await self.redis.set_state(f"is_parent_{uid}", "1", ex=GRADE_TTL)
+        return code
+
     async def ask_parent_code(self, message: NormalizedMessage) -> None:
-        await self.redis.delete_state(f"awaiting_name_{message.user_id}")
-        await self.redis.set_state(f"awaiting_parent_code_{message.user_id}", "true", ex=3600)
+        uid = message.user_id
+        await self.redis.delete_state(f"awaiting_name_{uid}")
+        await self.redis.set_state(f"awaiting_parent_code_{uid}", "true", ex=3600)
+        code = await self.family_code(uid, message.chat_id)
         await self._send_with_voice(
             message,
-            "👨‍👩‍👧 Здравствуйте! Чтобы подключиться к занятиям ребёнка, введите код из 6 цифр.\n\n"
-            "Ребёнок найдёт его у себя в боте: «⚙️ Настройки → 👨‍👩‍👧 Родитель».\n\n"
+            "👨‍👩‍👧 Здравствуйте! Подключим вас к занятиям ребёнка.\n\n"
+            f"🔑 Ваш код: {code}\n\n"
+            "Пусть ребёнок откроет Маячка и введёт этот код: «⚙️ Настройки → 👨‍👩‍👧 Родитель → 🔑 Ввести код родителя» "
+            f"(или напишет боту /family {code}). Код действует 7 дней — по нему можно подключить нескольких детей. "
+            "Когда ребёнок подключится, я сразу напишу.\n\n"
+            "Если ребёнок уже показал вам свой код — просто введите код ребёнка сюда, 6 цифр.\n\n"
             "Подключаясь, вы как родитель соглашаетесь на обработку данных ребёнка для учёбы — подробно: /privacy",
+            keyboard=None if await self._children_of(uid) else _kb([[_btn("↩️ Я не родитель", "parent_cancel")]]),
+            voice_text="Здравствуйте! Продиктуйте ребёнку ваш код. Он введёт его у себя в настройках, "
+                       "в разделе «Родитель», и вы увидите его занятия.",
         )
+
+    async def cancel_parent(self, uid: int) -> bool:
+        """«Я не родитель» (нажал по ошибке): забываем код и отметку родителя, если детей ещё нет."""
+        if await self._children_of(uid):
+            return False
+        code = await self.redis.get_state(f"fcode_of_{uid}")
+        if code:
+            await self.redis.delete_state(f"fcode_{code}")
+        for key in ("fcode_of", "is_parent", "awaiting_parent_code"):
+            await self.redis.delete_state(f"{key}_{uid}")
+        return True
 
     async def link_parent(self, message: NormalizedMessage, code: str) -> None:
         uid = message.user_id
         code = "".join(ch for ch in code if ch.isdigit())
         child = await self.redis.get_state(f"pcode_{code}") if len(code) == 6 else None
         if not child:
-            await self.answer(message, "Код не подошёл 🙈 Проверьте цифры или попросите ребёнка открыть "
-                                       "«⚙️ Настройки → 👨‍👩‍👧 Родитель» ещё раз — там будет свежий код.")
+            await self.answer(message, "Код не подошёл 🙈 Проверьте цифры. Проще всего — продиктуйте ребёнку ваш код "
+                                       "(нажмите «👨‍👩‍👧 Я родитель»), он введёт его у себя в настройках.")
             return
         child_uid = int(child)
         if child_uid == uid:
             await self.answer(message, "Это ваш собственный код 🙂 Его нужно ввести с телефона родителя.")
             return
         await self.redis.delete_state(f"awaiting_parent_code_{uid}")
-        parents = [p for p in await self._parents_of(child_uid) if p.get("user_id") != uid]
-        since = topic_progress.now().strftime("%d.%m.%Y")
-        parents = (parents + [{"user_id": uid, "chat_id": message.chat_id, "since": since}])[-MAX_PARENTS:]
-        await self._save_profile(child_uid, parents=json.dumps(parents))
-        children = [c for c in await self._children_of(uid) if c != child_uid] + [child_uid]
-        await self.redis.set_state(f"children_{uid}", json.dumps(children), ex=GRADE_TTL)
+        await self._attach_parent(uid, message.chat_id, child_uid)
+        await self.redis.set_state(f"is_parent_{uid}", "1", ex=GRADE_TTL)
         name = await self._child_name(child_uid)
         # Ребёнок всегда знает, кто видит его занятия
         await self.api.send_message(user_id=child_uid, text="👨‍👩‍👧 К твоим занятиям подключился родитель. "
@@ -184,7 +274,7 @@ class ParentMixin:
         name = await self._child_name(child_uid)
         await self.answer(
             message,
-            f"Отключиться от занятий: {name}? Отчёты приходить перестанут. Подключиться снова можно по новому коду ребёнка.",
+            f"Отключиться от занятий: {name}? Отчёты приходить перестанут. Подключиться снова можно по коду.",
             keyboard=_kb([[_btn("✅ Да, отключиться", f"parent_leave_yes_{child_uid}")], [_back("parent_menu")]]),
         )
 
@@ -203,7 +293,7 @@ class ParentMixin:
         if await self._children_of(uid):
             await self.show_parent_menu(message, note=note)
         else:
-            await self.answer(message, note + " Чтобы подключиться снова, напишите /parent и код ребёнка.")
+            await self.answer(message, note + " Чтобы подключиться снова, напишите /parent — я дам код для ребёнка.")
 
     async def _is_parent_of(self, parent_uid: int, child_uid: int) -> bool:
         return any(p.get("user_id") == parent_uid for p in await self._parents_of(child_uid))

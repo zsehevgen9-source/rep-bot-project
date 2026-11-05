@@ -248,20 +248,37 @@
     stepConsent();
   }
 
-  function parentOnboarding() {
-    setBack(() => { setBack(null); render(); });
-    const input = el("input", { class: "input big", placeholder: "Код из 6 цифр", inputmode: "numeric", maxlength: "6" });
-    const go_ = async () => {
+  // Родитель получает код и диктует его ребёнку — ребёнок вводит код у себя (как код класса учителя).
+  // Запасной путь: ввести код, который показал ребёнок.
+  async function parentOnboarding() {
+    const fromNew = !S.data || S.data.role === "new";
+    page(el("div", { class: "empty" }, "Готовлю код…"));
+    let code = "";
+    try { code = (await api("/api/family/code", {})).code; } catch (e) { toast(e.message); }
+    if (fromNew) { try { S.data = await api(withChild("/api/state")); } catch (e) { /* покажем код и так */ } }
+    const hasKids = !!(S.data && S.data.children && S.data.children.length);
+    const notParent = async () => { try { await api("/api/family/cancel", {}); } catch (e) { /* не страшно */ } setBack(null); S.tab = "home"; load(); };
+    setBack(hasKids ? () => { setBack(null); load(); } : notParent);
+    const input = el("input", { class: "input", placeholder: "Код ребёнка", inputmode: "numeric", maxlength: "6" });
+    const byChildCode = async () => {
       try { await api("/api/onboard/parent", { code: input.value }); } catch (e) { return toast(e.message, 3500); }
       setBack(null); confetti(); await load();
     };
     page(
-      el("div", { class: "section-head", style: "margin-top:4px" }, el("h2", { style: "font-size:24px" }, "👨‍👩‍👧 Подключение родителя")),
-      el("p", { class: "muted", style: "margin:0 4px 12px" }, "Попросите ребёнка открыть «⚙️ Настройки → 👨‍👩‍👧 Родитель» (в приложении или в чате) и показать код."),
-      input,
-      el("p", { class: "muted", style: "margin:10px 4px 0;font-size:14px" }, "Подключаясь, вы как родитель соглашаетесь на обработку данных ребёнка для учёбы."),
-      el("button", { class: "btn secondary small", style: "margin-top:8px", onclick: showPrivacy }, "📄 Политика"),
-      el("div", { class: "section" }, el("button", { class: "btn", onclick: go_ }, "Подключиться")));
+      el("div", { class: "section-head", style: "margin-top:4px" }, el("h2", { style: "font-size:24px" }, "👨‍👩‍👧 Код для ребёнка")),
+      el("div", { class: "card", style: "text-align:center" },
+        el("p", { class: "muted" }, "Продиктуйте ребёнку этот код:"),
+        el("div", { class: "code" }, code || "—"),
+        el("p", { style: "font-size:15px;margin-top:8px" }, "Ребёнок открывает Маячка → «⚙️ Настройки» → «👨‍👩‍👧 Родители» → вводит код."),
+        el("p", { class: "muted", style: "font-size:14px;margin-top:6px" }, "Код действует 7 дней. По нему можно подключить нескольких детей.")),
+      el("div", { class: "section" }, el("button", { class: "btn", onclick: () => { setBack(null); load(); } }, "🔄 Ребёнок ввёл код — проверить")),
+      el("div", { class: "section" },
+        el("div", { class: "section-head" }, el("h2", {}, "Есть код от ребёнка?")),
+        el("p", { class: "muted", style: "margin:0 4px 10px;font-size:14px" }, "Если ребёнок сам показал вам код в своих настройках — введите его здесь."),
+        el("div", { class: "btn-row", style: "margin-top:0" }, input, el("button", { class: "btn small", onclick: byChildCode }, "Подключить"))),
+      el("p", { class: "muted", style: "margin:14px 4px 0;font-size:14px" }, "Подключаясь, вы как родитель соглашаетесь на обработку данных ребёнка для учёбы."),
+      el("div", { class: "btn-row" }, el("button", { class: "btn secondary small", onclick: showPrivacy }, "📄 Политика"),
+        hasKids ? null : el("button", { class: "btn secondary small", onclick: notParent }, "↩️ Я не родитель")));
   }
 
   async function teacherOnboarding() {
@@ -323,8 +340,9 @@
               el("div", { class: "body" }, el("div", { class: "title" }, `Родитель ${p.n}`), el("div", { class: "meta" }, p.since ? `подключён ${p.since}` : "")),
               el("button", { class: "btn secondary small", onclick: () => unlinkParent(p) }, "Отключить"))))
               : el("p", { class: "muted" }, "Пока никто не подключён."),
+            familyForm(),
             el("div", { id: "pcode" }),
-            el("button", { class: "btn secondary", style: "margin-top:10px", onclick: showCode }, "🔑 Код для родителя"))) : null,
+            el("button", { class: "btn secondary small", style: "margin-top:10px", onclick: showCode }, "Или покажи родителю свой код"))) : null,
         st.grade ? el("div", { class: "section" },
           el("div", { class: "section-head" }, el("h2", {}, "🏫 Класс учителя")),
           el("div", { class: "card" }, st.tclass
@@ -339,6 +357,13 @@
             el("button", { class: "btn secondary danger", onclick: askDelete }, "🗑 Удалить"))),
       );
     };
+    function familyForm() {
+      const input = el("input", { class: "input", placeholder: "Код родителя", inputmode: "numeric", maxlength: "6" });
+      return [el("p", { class: "muted", style: "font-size:14px;margin-top:10px" }, "Мама или папа нажимает в Маячке «👨‍👩‍👧 Я родитель» и получает код — введи его здесь."),
+        el("div", { class: "btn-row" }, input, el("button", { class: "btn small", onclick: async () => {
+          try { st = await api("/api/family/join", { code: input.value }); toast("✅ Родитель подключён!"); draw(); } catch (e) { toast(e.message, 3500); }
+        } }, "Подключить"))];
+    }
     function joinForm() {
       const input = el("input", { class: "input", placeholder: "Код класса", maxlength: "8" });
       return [el("p", { class: "muted", style: "font-size:14px" }, "Учитель даёт код класса — введи его, и учитель сможет давать задания и видеть результаты."),
@@ -357,7 +382,7 @@
       try {
         const r = await api("/api/parent/code", {});
         document.getElementById("pcode").replaceChildren(el("div", { class: "code" }, r.code),
-          el("p", { class: "muted", style: "font-size:14px;text-align:center" }, "Покажи этот код маме или папе. Действует сутки."));
+          el("p", { class: "muted", style: "font-size:14px;text-align:center" }, "Покажи этот код маме или папе: в Маячке он вводится в «👨‍👩‍👧 Я родитель → Есть код от ребёнка?». Действует сутки."));
       } catch (e) { toast(e.message); }
     }
     function unlinkParent(p) {
@@ -430,7 +455,7 @@
         { ico: "⚙️", title: "Настройки", text: "Кнопка ⚙️ на главной вверху справа.", points: [
           "Имя, класс и голос Маячка (читать сразу, по кнопке или молчать).",
           "Увлечения — Маячок объясняет темы через них: футбол, игры, музыку…",
-          "🔑 Код для родителя — чтобы мама или папа видели твои успехи.",
+          "👨‍👩‍👧 Родители — введи код мамы или папы, чтобы они видели твои успехи.",
           "🏫 Класс учителя — введи код, который дал учитель." ] },
         { mood: "cheer", title: "Готово! 🚀", text: "Начни с главной или просто напиши Маячку в чат.", points: ["Подсказка всегда открывается снова кнопкой ❓ вверху."] },
       ];
@@ -438,9 +463,9 @@
     if (kind === "parent") {
       return [
         { mood: "wink", title: "Кабинет родителя 👋", text: "Здесь видно, как занимается ребёнок с Маячком. Покажу, что где.", points: ["Листайте кнопкой «Дальше» или пальцем влево."] },
-        { ico: "👨‍👩‍👧", title: "Дети", text: "Список подключённых детей.", points: [
+        { ico: "👨‍👩‍👧", title: "Дети", text: "Список подключённых детей. Подключить ребёнка: продиктуйте ему ваш код.", points: [
           "Нажмите на имя ребёнка — откроется его отчёт.",
-          "«➕ Ещё ребёнок» — подключить по коду. Код ребёнок берёт в «⚙️ Настройки → 🔑 Код для родителя».",
+          "«➕ Ещё ребёнок» — ваш код для ребёнка. Ребёнок вводит его у себя: «⚙️ Настройки → 👨‍👩‍👧 Родители».",
           "«🔕 Отключиться» — перестать видеть данные ребёнка." ] },
         { tab: "report", ico: "📋", title: "Отчёт", text: "Последние 7 дней.", points: [
           "Сколько дней занимался и сколько заданий решил.",
@@ -481,7 +506,7 @@
         "Учителю — классы, задания и результаты." ] },
       { ico: "🎒", title: "Как начать", text: "Выберите, кто вы:", points: [
         "Ученик: согласие → имя → класс. Готово!",
-        "Родитель: введите код из 6 цифр — его ребёнок берёт в «⚙️ Настройки → 🔑 Код для родителя».",
+        "Родитель: получите код и продиктуйте ребёнку — он введёт его у себя в «⚙️ Настройки → 👨‍👩‍👧 Родители».",
         "Учитель: кабинет откроется сразу." ] },
     ];
   }
@@ -967,6 +992,7 @@
   // ---------- родитель ----------
 
   function renderKids(d) {
+    if (d.role === "parent" && !d.children.length) return parentOnboarding();
     page(
       el("div", { class: "hero" },
         helpButton(true),
@@ -980,7 +1006,7 @@
           class: "item", onclick: () => { S.child = c.id; S.tab = "report"; load(); },
         }, el("div", { class: "ico", style: tint("#7c3aed") }, "🎒"),
           el("div", { class: "body" }, el("div", { class: "title" }, c.name), el("div", { class: "meta" }, c.grade ? `${c.grade} класс` : "класс не выбран")),
-          el("span", { class: "go" }, "›")))) : el("div", { class: "card empty" }, "Пока никто не подключён. Попросите ребёнка открыть в чате «⚙️ Настройки → 👨‍👩‍👧 Родитель» и прислать вам код.")),
+          el("span", { class: "go" }, "›")))) : el("div", { class: "card empty" }, "Пока никто не подключён. Нажмите «➕ Ещё ребёнок» — там ваш код для ребёнка.")),
       el("div", { class: "section btn-row" },
         el("button", { class: "btn secondary", onclick: parentOnboarding }, "➕ Ещё ребёнок"),
         el("button", { class: "btn secondary", onclick: showPrivacy }, "📄 Политика")),
@@ -1813,6 +1839,9 @@
         return this.cfg;
       }
       if (path === "/api/parent/code") return { code: "123456" };
+      if (path === "/api/family/code") { this.role = "parent"; return { code: "654321" }; }
+      if (path === "/api/family/cancel") { this.role = "new"; return { ok: true }; }
+      if (path === "/api/family/join") { if (body.code !== "654321") throw new Error("Код не подошёл (в демо — 654321)"); this.cfg.parents = [{ id: 3, n: 1, since: "сегодня" }]; return this.cfg; }
       if (path === "/api/parent/unlink") { this.cfg.parents = []; return this.cfg; }
       if (path === "/api/class/join") { this.cfg.tclass = { name: "5А", teachers: ["Анна Петровна"] }; return this.cfg; }
       if (path === "/api/class/leave") { this.cfg.tclass = null; return this.cfg; }

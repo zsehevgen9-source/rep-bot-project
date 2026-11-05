@@ -104,7 +104,7 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
                     await self.show_subjects(message, grade, intro=f"С возвращением, {name}! 👋 Готов продолжить учёбу?")
                 return
 
-            if await self._children_of(uid):   # это родитель — сразу в родительский раздел
+            if await self._children_of(uid) or await self.redis.get_state(f"is_parent_{uid}"):   # родитель — в его раздел
                 await self.show_parent_menu(message)
                 return
             if await self._is_teacher(uid, explicit=True):   # учитель (не ученик) — сразу в кабинет учителя
@@ -127,7 +127,7 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
                 and not await self.redis.get_state(f"awaiting_parent_code_{uid}") \
                 and not await self._is_teacher(uid) \
                 and not await self.has_consent(uid) and not await self._get_grade(uid) \
-                and not await self._children_of(uid):
+                and not await self._children_of(uid) and not await self.redis.get_state(f"is_parent_{uid}"):
             # Новый пользователь ещё не дал согласие: имя не запоминаем, в нейросеть ничего не отправляем.
             # Написал что-то вместо кнопки — считаем, что это ученик, и показываем согласие
             await self.ask_consent(message)
@@ -160,6 +160,16 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
             return
         if command.startswith("/add_teacher"):
             await self.add_teacher(message, command[len("/add_teacher"):])
+            return
+        if command.startswith("/family") or command.startswith("/семья"):
+            await self._reset_modes(uid)
+            code = "".join(ch for ch in command if ch.isdigit())
+            if code:
+                await self.join_family(message, code)
+            elif await self._get_grade(uid):
+                await self.ask_family_code(message)
+            else:
+                await self.show_parent_menu(message)
             return
         if command.startswith("/join"):
             await self._reset_modes(uid)
@@ -252,6 +262,9 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
         pending_asg = load_json(await self.redis.get_state(f"awaiting_tasg_{uid}"), None)
         if pending_asg:
             await self.create_assignment(message, pending_asg[0], pending_asg[1], text)
+            return
+        if await self.redis.get_state(f"awaiting_family_code_{uid}") == "true":
+            await self.join_family(message, text)
             return
         if await self.redis.get_state(f"awaiting_join_{uid}") == "true":
             await self.join_class(message, text)
@@ -551,6 +564,12 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
             elif payload == "parent_start":
                 await self.ask_parent_code(message)
 
+            elif payload == "parent_cancel":
+                if await self.cancel_parent(uid):
+                    await self.ask_role(message)
+                else:
+                    await self.show_parent_menu(message)
+
             elif payload == "parent_menu":
                 await self.show_parent_menu(message)
 
@@ -562,6 +581,9 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
 
             elif payload.startswith("parent_sch_"):
                 await self.parent_schedule(message, int(payload[len("parent_sch_"):]))
+
+            elif payload == "fam_enter":
+                await self.ask_family_code(message)
 
             elif payload == "parent_code":
                 await self.show_parent_code(message)

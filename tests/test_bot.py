@@ -985,7 +985,7 @@ async def main():
     PA = 50
     out = await say(PA, "/start")
     assert btns(out) == [("🎒 Я ученик", "role_student"), ("👨‍👩‍👧 Я родитель", "parent_start"), ("👩‍🏫 Я учитель", "role_teacher")]
-    out = await press(PA, "parent_start"); assert "введите код из 6 цифр" in last(out)
+    out = await press(PA, "parent_start"); assert "🔑 Ваш код:" in last(out) and "введите код ребёнка сюда" in last(out)
     out = await say(PA, "111111"); assert "Код не подошёл" in last(out)
     n = len(api.sent); out = await say(PA, code)
     assert "✅ Готово! Вы подключены к занятиям: Ева." in last(out) and ("📊 Отчёт · Ева", f"parent_rep_{E}") in btns(out)
@@ -1054,7 +1054,32 @@ async def main():
     # родитель удалил свои данные — у ребёнка он отключается
     await press(K, "parent_code"); await say(PK, "/parent " + redis.d[f"pcode_of_{K}"])
     await press(PK, "delete_me_yes"); assert json.loads(db.rows[K].parents) == []
+    # Основной способ: ребёнок вводит код родителя (как код класса учителя)
+    PF, KF, KG = 55, 56, 57
+    out = await say(PF, "/start"); out = await press(PF, "parent_start")
+    fcode = redis.d[f"fcode_of_{PF}"]; assert f"🔑 Ваш код: {fcode}" in last(out) and f"/family {fcode}" in last(out)
+    out = await say(PF, "/start"); assert f"🔑 Ваш код: {fcode}" in last(out)              # родитель без детей — снова его код
+    out = await say(PF, "привет"); assert "Прежде чем начать" not in last(out)              # родителю согласие ученика не нужно
+    await say(KF, "/start"); await say(KF, "Лиза"); await press(KF, "grade_2")
+    out = await press(KF, "parent_code"); assert ("🔑 Ввести код родителя", "fam_enter") == btns(out)[0]
+    out = await press(KF, "fam_enter"); assert "Напиши код родителя" in last(out)
+    out = await say(KF, "123"); assert "Код не подошёл" in last(out)
+    n = len(api.sent); out = await say(KF, fcode)
+    assert "✅ Готово! Родитель подключён" in last(out) and "Сейчас подключено родителей: 1" in last(out)
+    assert any("Лиза подключил(а) вас" in m["text"] for m in api.sent[n:])
+    assert json.loads(db.rows[KF].parents)[0]["user_id"] == PF
+    # тот же код подходит второму ребёнку, через команду
+    await say(KG, "/start"); await say(KG, "Гоша"); await press(KG, "grade_6")
+    out = await say(KG, f"/family {fcode}"); assert "✅ Готово!" in last(out)
+    out = await say(PF, "/start"); assert "Лиза" in last(out) and "Гоша" in last(out) and "Родительский раздел" in last(out)
+    out = await say(KF, f"/family {redis.d[f'pcode_of_{KF}']}"); assert "Код не подошёл" in last(out)   # код ребёнка — не код родителя
+    out = await say(PF, f"/family {fcode}"); assert "Родительский раздел" in last(out) or "Ваш код" in last(out)  # родитель — не ученик
     print("   Родитель: код на сутки, отчёт за неделю (и по воскресеньям сам), расписание за ребёнка, отключение: OK")
+    PX = 58                                                                                 # нажал «Я родитель» по ошибке
+    await say(PX, "/start"); out = await press(PX, "parent_start"); assert ("↩️ Я не родитель", "parent_cancel") in btns(out)
+    out = await press(PX, "parent_cancel"); assert ("🎒 Я ученик", "role_student") in btns(out) and f"is_parent_{PX}" not in redis.d
+    out = await press(PF, "parent_cancel"); assert "Родительский раздел" in last(out)            # с детьми — не сбрасываем
+    print("   Семейный код: родитель получает код, дети вводят его (в настройках или /family), родитель узнаёт: OK")
 
     # ---------- Демо-ученик для презентации ----------
     assert "только администратору" in last(await say(E, "/demo_student"))
@@ -2582,7 +2607,18 @@ async def test_miniapp_account():
     r = await A.link_parent(P, code); assert r["children"] == [U]
     assert any("подключился родитель" in m["text"] for m in api.sent[n:])
     assert (await A.state(P))["role"] == "parent" and (await A.settings(U))["parents"][0]["id"] == P
-    cfg = await A.unlink_parent(U, P); assert cfg["parents"] == [] and (await A.state(P))["role"] == "new"
+    cfg = await A.unlink_parent(U, P); assert cfg["parents"] == [] and (await A.state(P))["role"] == "parent" and (await A.state(P))["children"] == []
+    # 3б) Наоборот: родитель берёт код в приложении, ребёнок вводит его в настройках
+    P2 = 9866
+    fc = (await A.family_code(P2))["code"]; assert len(fc) == 6 and (await A.state(P2))["role"] == "parent"
+    assert (await A.family_code(P2))["code"] == fc                                          # тот же код, пока действует
+    await fails(A.join_family(U, "000000"))
+    n = len(api.sent)
+    cfg = await A.join_family(U, fc); assert cfg["parents"][0]["id"] == P2
+    assert any("подключил(а) вас" in m["text"] for m in api.sent[n:])
+    assert [k["id"] for k in (await A.state(P2))["children"]] == [U]
+    cfg = await A.unlink_parent(U, P2); assert cfg["parents"] == []
+    assert (await A.family_cancel(P2))["ok"] and (await A.state(P2))["role"] == "new"
     # 4) Учитель: запрос → кабинет сразу, профиль, класс, ученик вступает, задание, результаты, напоминание
     T = 9863
     r = await A.teacher_request(T); assert r["teacher"] and (await A.state(T))["role"] == "teacher"
