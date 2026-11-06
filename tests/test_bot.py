@@ -1162,6 +1162,7 @@ async def main():
     from datetime import datetime as _dt, timezone as _tz
     real_now = prog.now
     prog.now = lambda: _dt(2026, 11, 6, 11, 5, tzinfo=_tz.utc)                       # пятница, 16:05 по Екатеринбургу
+    await redis.delete_state(f"daily_plan_{G}")       # если тесты идут как раз 6 ноября, план «на сегодня» уже есть
     out = await say(G, "/today"); t = last(out)
     assert "Сегодня пятница — время мини-теста недели" in t and "«Математика»" in t, t
     assert btns(out) == [("🎯 Начать мини-тест", "weektest"), ("📅 Обычные задания", "plan_regular"), ("⏰ Позже", "subjects_6")]
