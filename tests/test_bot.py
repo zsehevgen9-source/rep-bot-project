@@ -1827,6 +1827,21 @@ async def test_miniapp():
     assert validate_init_data(init_data(77, age=3 * 86400), "TOKEN") is None          # старые данные
     assert validate_init_data("", "TOKEN") is None and validate_init_data("hash=1&hash=2", "TOKEN") is None
     assert validate_init_data("WebAppData=" + quote(good), "TOKEN")["user"]["id"] == 77
+    # Разные клиенты MAX: имя с пробелом и аватар со знаками %, & и = в ссылке
+    from urllib.parse import quote_plus
+    rich = {"auth_date": str(int(_time.time())), "query_id": "q1", "start_param": "", "ip": "1.2.3.4",
+            "user": json.dumps({"id": 78, "first_name": "Мария Ивановна", "last_name": "Петрова",
+                                "photo_url": "https://i.example.ru/i?r=AbC%3D%3D&size=200"}, ensure_ascii=False)}
+    h = sign(rich, "TOKEN")
+    enc = "&".join(f"{k}={quote(v, safe='')}" for k, v in rich.items()) + f"&hash={h}"       # %20
+    plus = "&".join(f"{k}={quote_plus(v)}" for k, v in rich.items()) + f"&hash={h}"          # пробел как «+»
+    raw = "&".join(f"{k}={v}" for k, v in rich.items()) + f"&hash={h}"                       # без кодирования
+    for variant in (enc, plus, raw, quote(enc, safe=""), "WebAppData=" + quote(enc, safe="")):
+        assert (validate_init_data(variant, "TOKEN") or {}).get("user", {}).get("id") == 78, variant[:60]
+    assert validate_init_data(raw, "OTHER") is None and validate_init_data(plus.replace("q1", "q2"), "TOKEN") is None
+    assert validate_init_data(raw.replace("Петрова", "Иванова"), "TOKEN") is None              # подделка имени
+    ms = dict(rich, auth_date=str(int(_time.time() * 1000))); hm = sign(ms, "TOKEN")
+    assert validate_init_data("&".join(f"{k}={quote(v)}" for k, v in ms.items()) + f"&hash={hm}", "TOKEN")
 
     @asynccontextmanager
     async def session_factory():
