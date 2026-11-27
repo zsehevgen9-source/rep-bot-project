@@ -8,8 +8,12 @@
 Хранится в Redis (с appendonly — переживает перезапуск):
     teachers                 — кого администратор сделал учителем
     tclasses_<учитель>       — коды классов учителя
-    tprofile_<учитель>       — {kind: primary|subject, subjects: [...], name}: начальных классов или предметник
-    tclass_<код>             — класс: {code, owner, teachers: {учитель: [предметы]}, grade, name, students, assignments}
+    tprofile_<учитель>       — {kind: primary|subject, subjects: [...], homeroom, name}: начальных классов или предметник;
+                               homeroom — классный руководитель (у учителя начальных классов — всегда)
+    tclass_<код>             — класс: {code, owner, homeroom, teachers: {учитель: [предметы]}, grade, name, students,
+                               assignments}. homeroom — классный руководитель класса (один на класс): видит отчёт
+                               ученика по всем предметам и родителей класса; предметник — только свои предметы.
+                               В старых классах поля нет — классный руководитель тот, кто создал класс.
                                Один класс (например, 5А) — общий для всех его учителей: ученики вступают один раз,
                                учителя-предметники подключаются к уже созданному классу по тому же коду.
     my_tclass_<ученик>       — код класса ученика
@@ -88,13 +92,40 @@ class TeacherMixin:
 
     @staticmethod
     def _teacher_grades(profile: Dict[str, Any]) -> List[int]:
-        """Классы, которые может вести учитель: начальных — 1–4, предметник — 5–11, где есть его предметы."""
+        """Классы, которые может вести учитель: начальных — 1–4, предметник — 5–11, где есть его предметы;
+        классный руководитель — любой из 5–11 (свой класс может быть и без его предметов)."""
         if profile.get("kind") == "primary":
             return [1, 2, 3, 4]
         subjects = set(profile.get("subjects") or [])
         # В 1–4 классах у предметника может быть только английский (остальное ведёт учитель начальных классов)
         return [g for g in range(1, 12)
-                if (subjects if g >= 5 else subjects & PRIMARY_SUBJECT_TEACHERS) & {sid for _, sid in SUBJECTS[g]}]
+                if (subjects if g >= 5 else subjects & PRIMARY_SUBJECT_TEACHERS) & {sid for _, sid in SUBJECTS[g]}
+                or (g >= 5 and profile.get("homeroom"))]
+
+    @staticmethod
+    def _homeroom_ok(profile: Dict[str, Any]) -> bool:
+        """Может быть классным руководителем: отметил это в профиле, или учитель начальных классов."""
+        return profile.get("kind") == "primary" or bool(profile.get("homeroom"))
+
+    @staticmethod
+    def _homeroom(data: Dict[str, Any]) -> Optional[int]:
+        """Классный руководитель класса. В классах до этой версии — тот, кто создал класс."""
+        return data["homeroom"] if "homeroom" in data else data.get("owner")
+
+    async def _homeroom_code(self, uid: int) -> Optional[str]:
+        """Код класса, где учитель — классный руководитель (такой класс у учителя один)."""
+        for code in load_json(await self.redis.get_state(f"tclasses_{uid}"), []):
+            data = await self._tclass(code)
+            if data and self._homeroom(data) == uid:
+                return code
+        return None
+
+    async def _view_subjects(self, data: Dict[str, Any], uid: int) -> List[str]:
+        """Что учитель видит в слабых темах и на карте: классный руководитель — все предметы класса,
+        предметник — свои. Задания каждый даёт только по своим предметам."""
+        if self._homeroom(data) == uid:
+            return [sid for _, sid in SUBJECTS.get(data["grade"], [])]
+        return await self._my_subjects(data, uid)
 
     @staticmethod
     def _class_subjects(profile: Dict[str, Any], grade: int) -> List[str]:
@@ -129,19 +160,26 @@ class TeacherMixin:
     async def ask_teacher_subjects(self, message: NormalizedMessage, note: str = "") -> None:
         profile = await self._tprofile(message.user_id)
         chosen = profile.get("subjects") or []
+        homeroom = bool(profile.get("homeroom"))
         buttons = [_btn(("✅ " if sid in chosen else "▫️ ") + button_title(DEFAULT_TITLES[sid]), f"t_subj_{sid}")
                    for sid in TEACHER_SUBJECTS]
-        rows = _fit_rows(buttons, max_per_row=2)
-        if chosen:
-            rows.append([_btn(f"👍 Готово (выбрано {len(chosen)})", "t_subj_done")])
-        await self._quiet(message, (f"{note}\n\n" if note else "") + "📐 Какие предметы вы ведёте? "
-                                   "Отметьте один или несколько (например, алгебру и геометрию) и нажмите «Готово».",
+        rows = [[_btn(("✅" if homeroom else "▫️") + " Классный руководитель", "t_subj_homeroom")]]
+        rows += _fit_rows(buttons, max_per_row=2)
+        if chosen or homeroom:
+            rows.append([_btn(f"👍 Готово (выбрано {len(chosen) + homeroom})", "t_subj_done")])
+        await self._quiet(message, (f"{note}\n\n" if note else "") + "📐 Что вы ведёте?\n\n"
+                                   "Если у вас есть свой класс — отметьте «Классный руководитель». Затем отметьте предметы "
+                                   "(например, алгебру и геометрию) и нажмите «Готово». Можно выбрать только "
+                                   "классное руководство, без предметов.",
                           keyboard=_kb(rows))
 
     async def toggle_teacher_subject(self, message: NormalizedMessage, sid: str) -> None:
         uid = message.user_id
         profile = await self._tprofile(uid)
-        if sid in TEACHER_SUBJECTS:
+        if sid == "homeroom":
+            profile["homeroom"] = not profile.get("homeroom")
+            await self._save_tprofile(uid, profile)
+        elif sid in TEACHER_SUBJECTS:
             chosen = profile.get("subjects") or []
             profile["subjects"] = [s for s in chosen if s != sid] if sid in chosen else chosen + [sid]
             await self._save_tprofile(uid, profile)
@@ -149,8 +187,8 @@ class TeacherMixin:
 
     async def teacher_subjects_done(self, message: NormalizedMessage) -> None:
         profile = await self._tprofile(message.user_id)
-        if not profile.get("subjects"):
-            await self.ask_teacher_subjects(message, note="Отметьте хотя бы один предмет.")
+        if not profile.get("subjects") and not profile.get("homeroom"):
+            await self.ask_teacher_subjects(message, note="Отметьте хотя бы один предмет или «Классный руководитель».")
             return
         if profile.get("name"):
             await self.show_teacher_menu(message, note="✅ Предметы сохранены.")
@@ -172,15 +210,17 @@ class TeacherMixin:
     def _profile_line(self, profile: Dict[str, Any]) -> str:
         if profile.get("kind") == "primary":
             return f"{profile.get('name') or 'Учитель'} · начальные классы"
-        titles = ", ".join(DEFAULT_TITLES[s] for s in profile.get("subjects") or [])
-        return f"{profile.get('name') or 'Учитель'} · {titles}"
+        what = (["классный руководитель"] if profile.get("homeroom") else []) + \
+            [DEFAULT_TITLES[s] for s in profile.get("subjects") or []]
+        return f"{profile.get('name') or 'Учитель'} · {', '.join(what)}"
 
     async def show_teacher_profile(self, message: NormalizedMessage) -> None:
         profile = await self._tprofile(message.user_id)
         rows = [[_btn("🔄 Начальные/предметник", "t_kind")]]
         if profile.get("kind") == "subject":
             rows.append([_btn("📐 Мои предметы", "t_subjects")])
-        rows += [[_btn("✏️ Имя для учеников", "t_rename")], [_btn("🔄 Сменить роль", "role_switch")], [_back("t_menu")]]
+        rows += [[_btn("✏️ Имя для учеников", "t_rename")]] + await self.mode_rows(message.user_id, "teacher")
+        rows += [[_btn("🔄 Сменить роль", "role_switch")], [_back("t_menu")]]
         await self._quiet(message, "👤 Профиль учителя\n\n" + self._profile_line(profile), keyboard=_kb(rows))
 
     # ---------- данные класса ----------
@@ -243,17 +283,37 @@ class TeacherMixin:
         if not profile.get("name"):
             await self.ask_teacher_name(message)
             return
-        rows, lines = [], []
+        await self.remember_mode(uid, "teacher")
+        own, other, buttons, lines = [], [], [], []
         for code in load_json(await self.redis.get_state(f"tclasses_{uid}"), []):
             data = await self._tclass(code)
-            if data:
-                lines.append(f"• {data['name']} — учеников: {len(data['students'])}, код {code}")
-                rows.append([_btn(f"🏫 {data['name']}", f"t_cls_{code}")])
-        rows = _fit_rows([b for r in rows for b in r], max_per_row=2)
+            if not data:
+                continue
+            if self._homeroom(data) == uid:   # обычно один; в классах до этой версии — все, что учитель создал сам
+                own.append(data)
+                continue
+            subj = ", ".join(DEFAULT_TITLES[x] for x in data["teachers"].get(str(uid)) or [])
+            other.append(f"• {data['name']}" + (f" — {subj}" if subj else "") +
+                         f", учеников: {len(data['students'])}, код {code}")
+            buttons.append(_btn(f"🏫 {data['name']}", f"t_cls_{code}"))
+        rows = []
+        if own:
+            lines += ["🏠 Мой класс (классный руководитель):"] + [
+                f"• {d['name']} — учеников: {len(d['students'])}, код {d['code']}" for d in own]
+            for d in own:
+                label = f"🏠 Мой класс · {d['name']}"
+                rows.append([_btn(label if _vis_len(label) <= BUTTON_MAX else f"🏠 {d['name']}", f"t_cls_{d['code']}")])
+        elif self._homeroom_ok(profile):
+            lines += ["🏠 Мой класс: ещё не выбран. Нажмите «➕ Добавить класс» — создайте свой класс или "
+                      "подключитесь по коду, и вы станете его классным руководителем."]
+        if other:
+            lines += ([""] if lines else []) + ["📐 Мои предметы:"] + other
+        rows += _fit_rows(buttons, max_per_row=2)
         rows.append([_btn("➕ Добавить класс", "t_add")])
         rows.append([_btn("👤 Мой профиль", "t_prof")])
+        rows += await self.mode_rows(uid, "teacher")
         text = (f"{note}\n\n" if note else "") + "👩‍🏫 Кабинет учителя\n" + self._profile_line(profile) + "\n\n" + (
-            "\n".join(lines) if lines else "Классов пока нет. Нажмите «➕ Добавить класс»."
+            "\n".join(lines) if own or other or lines else "Классов пока нет. Нажмите «➕ Добавить класс»."
             + (" Предметники обычно ведут 3–4 класса — добавьте каждый." if profile.get("kind") == "subject" else ""))
         await self._quiet(message, text, keyboard=_kb(rows))
 
@@ -289,16 +349,22 @@ class TeacherMixin:
             return
         profile = await self._tprofile(uid)
         subjects = self._class_subjects(profile, data["grade"])
-        if data["grade"] not in self._teacher_grades(profile) or not subjects:
+        # Классным руководителем станет, если у класса его ещё нет, а у учителя нет своего класса
+        homeroom = (self._homeroom_ok(profile) and self._homeroom(data) is None
+                    and data["grade"] in self._teacher_grades(profile) and not await self._homeroom_code(uid))
+        if not homeroom and (data["grade"] not in self._teacher_grades(profile) or not subjects):
             await self.show_teacher_menu(message, note=f"Класс «{data['name']}» — {data['grade']} класс: ваших предметов "
                                                        "в нём нет. Проверьте предметы в «👤 Мой профиль».")
             return
         data["teachers"][str(uid)] = subjects
+        if homeroom:
+            data["homeroom"] = uid
         await self._save_tclass(data)
         classes = load_json(await self.redis.get_state(f"tclasses_{uid}"), [])
         if code not in classes:
             await self.redis.set_state(f"tclasses_{uid}", json.dumps(classes + [code]))
-        await self.show_class(message, code, note=f"✅ Вы подключились к классу «{data['name']}».")
+        await self.show_class(message, code, note=f"✅ Вы подключились к классу «{data['name']}»." +
+                              (" Вы — его классный руководитель." if homeroom else ""))
 
     async def ask_new_class(self, message: NormalizedMessage) -> None:
         if not await self._is_teacher(message.user_id):
@@ -332,13 +398,16 @@ class TeacherMixin:
             code = "".join(random.choice(CODE_CHARS) for _ in range(6))
             if not await self.redis.get_state(f"tclass_{code}"):
                 break
-        subjects = self._class_subjects(await self._tprofile(uid), grade)
-        data = {"code": code, "owner": uid, "teachers": {str(uid): subjects}, "grade": grade, "name": name,
-                "students": [], "assignments": [], "created": topic_progress.now().date().isoformat()}
+        profile = await self._tprofile(uid)
+        subjects = self._class_subjects(profile, grade)
+        homeroom = uid if self._homeroom_ok(profile) and not await self._homeroom_code(uid) else None
+        data = {"code": code, "owner": uid, "homeroom": homeroom, "teachers": {str(uid): subjects}, "grade": grade,
+                "name": name, "students": [], "assignments": [], "created": topic_progress.now().date().isoformat()}
         await self._save_tclass(data)
         classes = load_json(await self.redis.get_state(f"tclasses_{uid}"), []) + [code]
         await self.redis.set_state(f"tclasses_{uid}", json.dumps(classes))
-        await self.show_class(message, code, note=f"✅ Класс «{name}» создан.\n\n" + self._join_hint(code) +
+        await self.show_class(message, code, note=f"✅ Класс «{name}» создан." +
+                              (" Вы — его классный руководитель." if homeroom else "") + "\n\n" + self._join_hint(code) +
                               "\n\nДругие учителя этого класса подключаются по тому же коду: «➕ Добавить класс → 🔑 Подключиться по коду».")
 
     @staticmethod
@@ -361,9 +430,12 @@ class TeacherMixin:
                  f"Учеников: {len(stats)}, занимались за неделю: {active}",
                  f"Решено заданий за неделю: {solved}" + (f", с первой попытки: {round(100 * first / solved)}%" if solved else "")]
         names = []
+        head = self._homeroom(data)
         for t, subj in data["teachers"].items():
             kind = (await self._tprofile(int(t))).get("kind")
             what = "начальные классы" if kind == "primary" else ", ".join(DEFAULT_TITLES[x] for x in subj)
+            if int(t) == head:
+                what = "классный руководитель" + (f", {what}" if what else "")
             names.append(f"{await self._teacher_name(int(t))}" + (f" ({what})" if what else ""))
         lines.append("Учителя: " + "; ".join(names))
         mine = self._mine(data, message.user_id)
@@ -381,6 +453,7 @@ class TeacherMixin:
             [_btn("📝 Задать", f"t_asg_{code}"), _btn("📊 Итоги", f"t_res_{code}")],
             [_btn("🗺 Карта тем", f"tx_map_{code}"), _btn("⭐ Звёзды", f"tx_star_{code}")],
             [_btn("📢 Объявить", f"tx_ann_{code}"), _btn("📥 Excel", f"tx_xls_{code}")],
+        ] + ([[_btn("👨‍👩‍👧 Родители класса", f"t_par_{code}")]] if head == message.user_id else []) + [
             [_btn("🔑 Код", f"t_code_{code}"),
              _btn("🗑 Удалить", f"t_del_{code}") if data.get("owner") == message.user_id else _btn("🚪 Выйти", f"t_unlink_{code}")],
             [_back("t_menu")],
@@ -423,17 +496,61 @@ class TeacherMixin:
         if not data or student not in data["students"]:
             await self.show_teacher_menu(message)
             return
-        text = await self.build_parent_report(student)
+        text = await self.student_report_for(data, message.user_id, student)
         await self._quiet(message, text, keyboard=_kb([[_btn("🏅 Грамота", f"tx_cert_{code}_{student}")],
                                                        [_back(f"t_stu_{code}")]]))
+
+    async def student_report_for(self, data: Dict[str, Any], uid: int, student: int) -> str:
+        """Классный руководитель видит полный отчёт (как родитель), предметник — только по своим предметам."""
+        if self._homeroom(data) == uid:
+            return await self.build_parent_report(student)
+        subjects = await self._my_subjects(data, uid)
+        grade = data["grade"]
+        week = await self._student_week(student)
+        entries = [e for e in load_json((await self._load_profile(student)).get("topic_progress"), {}).values()
+                   if e.get("grade") == grade and e.get("subject_id") in subjects and e.get("topic")]
+        known = sum(1 for e in entries if e.get("status") in ("known", "mastered"))
+        weak = [e for e in entries if e.get("status") == "weak"]
+        titles = ", ".join(subject_title(grade, s) for s in subjects) or "ваши предметы"
+        lines = [f"📊 {week['name']} — {titles}", "",
+                 f"Тем пройдено: {len(entries)}, знает: {known}, стоит подтянуть: {len(weak)}"]
+        if weak:
+            lines.append("Подтянуть: " + "; ".join(f"«{e['topic']}»" for e in weak[:5]))
+        mine = self._mine(data, uid)[-5:]
+        if mine:
+            lines += ["", "Ваши задания:"]
+            for task in mine:
+                r = task["results"].get(str(student))
+                lines.append(f"• «{task['topic']}»: " + (f"оценка {r['mark']}" if r and r.get("mark") else
+                                                         "сделано" if r else "не сделано"))
+        lines += ["", "Отчёт по всем предметам видит классный руководитель."]
+        return "\n".join(lines)
+
+    async def show_class_parents(self, message: NormalizedMessage, code: str) -> None:
+        """👨‍👩‍👧 Родители класса — только классному руководителю: у кого из учеников подключены родители."""
+        data = await self._own_tclass(message.user_id, code)
+        if not data or self._homeroom(data) != message.user_id:
+            await self.show_teacher_menu(message)
+            return
+        lines, with_parents = [f"👨‍👩‍👧 {data['name']} — родители в Маячке", ""], 0
+        for student in data["students"]:
+            n = len(await self._parents_of(student))
+            with_parents += bool(n)
+            lines.append(f"• {(await self._student_week(student))['name']}: " +
+                         (f"подключено родителей — {n}" if n else "родитель не подключён"))
+        if not data["students"]:
+            lines.append("Учеников пока нет. " + self._join_hint(code))
+        else:
+            lines += ["", f"Родители подключены у {with_parents} из {len(data['students'])}.",
+                      "Родителя подключает ученик: «⚙️ Настройки → 👨‍👩‍👧 Родитель». Объявление родителям — «📢 Объявить»."]
+        await self._quiet(message, "\n".join(lines), keyboard=_kb([[_back(f"t_cls_{code}")]]))
 
     async def show_class_weak(self, message: NormalizedMessage, code: str) -> None:
         data = await self._own_tclass(message.user_id, code)
         if not data:
             await self.show_teacher_menu(message)
             return
-        my_subjects = set(data["teachers"].get(str(message.user_id)) or
-                          self._class_subjects(await self._tprofile(message.user_id), data["grade"]))
+        my_subjects = set(await self._view_subjects(data, message.user_id))
         counts: Dict[tuple, int] = {}
         for sid_ in data["students"]:
             for e in (await self._student_week(sid_))["weak"]:
@@ -737,6 +854,8 @@ class TeacherMixin:
         data = await self._own_tclass(uid, code)
         if data and data.get("owner") != uid:
             data["teachers"].pop(str(uid), None)
+            if self._homeroom(data) == uid:
+                data["homeroom"] = None
             await self._save_tclass(data)
             classes = [c for c in load_json(await self.redis.get_state(f"tclasses_{uid}"), []) if c != code]
             await self.redis.set_state(f"tclasses_{uid}", json.dumps(classes))

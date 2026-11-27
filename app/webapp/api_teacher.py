@@ -42,29 +42,34 @@ class TeacherAPIMixin:
                 mine = h._mine(data, uid)
                 classes.append({"code": code, "name": data["name"], "grade": data["grade"],
                                 "students": len(data["students"]), "owner": data.get("owner") == uid,
+                                "homeroom": h._homeroom(data) == uid,
+                                "subjects": ", ".join(DEFAULT_TITLES[x] for x in data["teachers"].get(str(uid)) or []),
                                 "assignments": len(mine)})
+            classes.sort(key=lambda c: not c["homeroom"])     # свой класс — первым
             return {
                 "profile": {"kind": profile.get("kind"), "subjects": profile.get("subjects") or [],
+                            "homeroom": bool(profile.get("homeroom")), "homeroom_ok": h._homeroom_ok(profile),
                             "name": profile.get("name") or "", "line": h._profile_line(profile) if profile.get("kind") else ""},
                 "subject_options": [{"id": sid, "title": DEFAULT_TITLES[sid]} for sid in TEACHER_SUBJECTS],
                 "grades": h._teacher_grades(profile) if profile.get("kind") else list(range(1, 12)),
                 "classes": classes,
             }
 
-    async def teacher_profile(self, uid: int, kind: Any, subjects: Any, name: Any) -> Dict[str, Any]:
+    async def teacher_profile(self, uid: int, kind: Any, subjects: Any, name: Any, homeroom: Any = None) -> Dict[str, Any]:
         from app.webapp.api import ApiError
         async with self._handler() as h:
             await self._teacher_or_403(h, uid)
             if kind not in ("primary", "subject"):
                 raise ApiError(400, "Выберите: начальные классы или предметник")
             subjects = [s for s in (subjects or []) if s in TEACHER_SUBJECTS] if kind == "subject" else []
-            if kind == "subject" and not subjects:
-                raise ApiError(400, "Отметьте хотя бы один предмет")
+            homeroom = bool(homeroom) and kind == "subject"   # учитель начальных классов — руководитель и так
+            if kind == "subject" and not subjects and not homeroom:
+                raise ApiError(400, "Отметьте хотя бы один предмет или «Классный руководитель»")
             name = " ".join(str(name or "").split())[:40]
             if not name:
                 raise ApiError(400, "Напишите, как к вам обращаться")
             profile = await h._tprofile(uid)
-            profile.update({"kind": kind, "subjects": subjects, "name": name})
+            profile.update({"kind": kind, "subjects": subjects, "homeroom": homeroom, "name": name})
             await h._save_tprofile(uid, profile)
         return await self.teacher_home(uid)
 
@@ -109,7 +114,9 @@ class TeacherAPIMixin:
             data = await self._class_or_404(h, uid, code)
             profile = await h._tprofile(uid)
             mine_subjects = self._mine_subjects(h, data, uid, profile)
-            students, weak = [], {}
+            view_subjects = await h._view_subjects(data, uid)   # классный руководитель — все предметы класса
+            head = h._homeroom(data)
+            students, weak, parents = [], {}, []
             for sid_ in data["students"]:
                 s = await h._student_week(sid_)
                 marks = [m["mark"] for m in s["marks"]]
@@ -117,14 +124,16 @@ class TeacherAPIMixin:
                                  "accuracy": round(100 * s["first"] / s["solved"]) if s["solved"] else None,
                                  "avg_mark": round(sum(marks) / len(marks), 1) if marks else None,
                                  "streak": s["streak"], "weak": len(s["weak"])})
+                if head == uid:
+                    parents.append({"id": sid_, "name": s["name"], "parents": len(await h._parents_of(sid_))})
                 for e in s["weak"]:
-                    if e.get("grade") == data["grade"] and e.get("subject_id") in mine_subjects:
+                    if e.get("grade") == data["grade"] and e.get("subject_id") in view_subjects:
                         key = (e["subject_id"], e["topic"])
                         weak[key] = weak.get(key, 0) + 1
             teachers = []
             for t, subj in data["teachers"].items():
                 kind = (await h._tprofile(int(t))).get("kind")
-                teachers.append({"name": await h._teacher_name(int(t)),
+                teachers.append({"name": await h._teacher_name(int(t)), "homeroom": int(t) == head,
                                  "what": "начальные классы" if kind == "primary" else ", ".join(DEFAULT_TITLES[x] for x in subj)})
             today = await h._local_date(uid)
             assignments = []
@@ -138,6 +147,8 @@ class TeacherAPIMixin:
                 })
             return {
                 "code": data["code"], "name": data["name"], "grade": data["grade"], "owner": data.get("owner") == uid,
+                "homeroom": head == uid,
+                "parents": sorted(parents, key=lambda p: p["name"]) if head == uid else None,
                 "teachers": teachers,
                 "students": sorted(students, key=lambda s: s["name"]),
                 "week": {"active": sum(1 for s in students if s["solved"]), "solved": sum(s["solved"] for s in students)},
@@ -155,7 +166,7 @@ class TeacherAPIMixin:
             data = await self._class_or_404(h, uid, code)
             if not isinstance(student, int) or student not in data["students"]:
                 raise ApiError(404, "Ученика нет в этом классе")
-            return {"report": await h.build_parent_report(student)}
+            return {"report": await h.student_report_for(data, uid, student)}
 
     # ---------- задания ----------
 

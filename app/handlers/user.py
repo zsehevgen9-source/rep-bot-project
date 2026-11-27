@@ -106,10 +106,11 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
                     await self.show_subjects(message, grade, intro=f"С возвращением, {name}! 👋 Готов продолжить учёбу?")
                 return
 
-            if await self._children_of(uid) or await self.redis.get_state(f"is_parent_{uid}"):   # родитель — в его раздел
+            mode = await self.current_mode(uid)   # учитель и/или родитель — в раздел, где был в прошлый раз
+            if mode == "parent":
                 await self.show_parent_menu(message)
                 return
-            if await self._is_teacher(uid, explicit=True):   # учитель (не ученик) — сразу в кабинет учителя
+            if mode == "teacher":
                 await self.show_teacher_menu(message)
                 return
             await self._send_card(message, cards.welcome_card)
@@ -575,6 +576,9 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
             elif payload.startswith("pr_") and await self._family_payload(message, payload):
                 pass
 
+            elif payload in ("mode_parent", "mode_teacher"):
+                await self.set_mode(message, payload[len("mode_"):])
+
             elif payload == "role_switch":
                 await self.ask_switch_role(message)
 
@@ -583,7 +587,10 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
 
             elif payload == "parent_cancel":
                 if await self.cancel_parent(uid):
-                    await self.ask_role(message)
+                    if await self._is_teacher(uid, explicit=True):   # учитель передумал — обратно в кабинет
+                        await self.show_teacher_menu(message)
+                    else:
+                        await self.ask_role(message)
                 else:
                     await self.show_parent_menu(message)
 
@@ -828,6 +835,8 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
 
             elif payload == "t_menu":
                 await self.show_teacher_menu(message)
+            elif payload.startswith("t_par_"):
+                await self.show_class_parents(message, payload[len("t_par_"):])
             elif payload in ("t_kind_primary", "t_kind_subject"):
                 await self.set_teacher_kind(message, payload[len("t_kind_"):])
             elif payload == "t_kind":

@@ -2104,7 +2104,8 @@ async def test_teacher():
     # первый вход: начальные классы или предметник → предметы → имя для учеников
     out = await say(T, "/start"); assert "Какие классы вы ведёте?" in last(out)
     assert btns(out) == [("🧸 Начальные классы", "t_kind_primary"), ("📐 Учитель-предметник", "t_kind_subject")]
-    out = await press(T, "t_kind_subject"); assert "Какие предметы вы ведёте?" in last(out) and ("▫️ Геометрия", "t_subj_geo_math") in btns(out)
+    out = await press(T, "t_kind_subject"); assert "Что вы ведёте?" in last(out) and ("▫️ Геометрия", "t_subj_geo_math") in btns(out)
+    assert btns(out)[0] == ("▫️ Классный руководитель", "t_subj_homeroom")                 # классное руководство — первым
     out = await press(T, "t_subj_done"); assert "Отметьте хотя бы один предмет" in last(out)
     out = await press(T, "t_subj_math"); assert ("✅ Математика", "t_subj_math") in btns(out) and ("👍 Готово (выбрано 1)", "t_subj_done") in btns(out)
     out = await press(T, "t_subj_done"); assert "Как к вам обращаться" in last(out)
@@ -2140,7 +2141,9 @@ async def test_teacher():
     out = await press(T, f"t_cls_{code}"); assert "Учеников: 2" in last(out)
     out = await press(T, f"t_stu_{code}"); t = last(out)
     assert "• Аня: дней 0/7, решено 0" in t and "• Оля" in t and ("Аня", f"t_rep_{code}_{S1}") in btns(out)
-    out = await press(T, f"t_rep_{code}_{S1}"); assert last(out).startswith("📊 Аня, 5 класс")
+    out = await press(T, f"t_rep_{code}_{S1}"); t = last(out)                           # предметник — только свой предмет
+    assert t.startswith("📊 Аня — Математика") and "Отчёт по всем предметам видит классный руководитель" in t, t
+    assert ("👨‍👩‍👧 Родители класса", f"t_par_{code}") not in btns(await press(T, f"t_cls_{code}"))
     # чужой учитель и ученик не видят класс
     out = await press(X, f"t_cls_{code}"); assert "Кабинет учителя — для учителей" in last(out)
     out = await press(S1, f"t_stu_{code}"); assert "Кабинет учителя — для учителей" in last(out)
@@ -2228,7 +2231,7 @@ async def test_teacher():
     out = await press(T4, "t_new"); grades_btn = [p for _, p in btns(out) if p.startswith("t_new_")]
     assert grades_btn == [f"t_new_{g}" for g in range(2, 12)], grades_btn
     await press(T4, "t_link"); out = await say(T4, c2); assert "✅ Вы подключились к классу «2А»" in last(out)
-    assert "Анна Сергеевна (начальные классы); Елена Викторовна (Английский язык)" in last(out), last(out)
+    assert "Анна Сергеевна (классный руководитель, начальные классы); Елена Викторовна (Английский язык)" in last(out), last(out)
     out = await press(T4, f"t_asg_{c2}"); assert "Английский язык" in last(out) and "Напишите тему задания" in last(out)
     # учитель математики 5–11 не видит 1–4 классы
     out = await press(T, "t_new"); assert ("4 класс", "t_new_4") not in btns(out)
@@ -2425,6 +2428,96 @@ async def test_family_and_class_extras():
     assert ("👨‍👩‍👧 Я родитель", "parent_start") in btns(out) and json.loads(db.rows[C].parents) == []
     assert any(m["to"] == C and "Родитель отключился" in m["text"] for m in api.sent[n:])
     print("   Учитель: тема урока одной кнопкой, срок и автонапоминание, карта тем, Excel, звёзды и грамоты, объявление: OK")
+
+
+async def test_roles_and_homeroom():
+    """Учитель — он же родитель и классный руководитель: роли складываются, режим переключается без потерь."""
+    from contextlib import asynccontextmanager
+    from app.webapp.api import ApiError, MiniAppAPI
+    @asynccontextmanager
+    async def session_factory():
+        yield db
+    A = MiniAppAPI(lambda session: UserHandler(api, session, redis), session_factory, "mayachok_bot")
+    async def fails(coro, status=400):
+        try: await coro; assert False, "ожидалась ошибка"
+        except ApiError as e: assert e.status == status, (e.status, e.message); return e
+    HR, PE, T6, KID, KID2, P = 9871, 9872, 9873, 9874, 9875, 9876
+    for t in (HR, PE, T6):
+        await say(ADMIN, f"/add_teacher {t}")
+    # «Классный руководитель» — в выборе предметов; можно без предметов
+    await say(HR, "/teacher"); await press(HR, "t_kind_subject")
+    out = await press(HR, "t_subj_homeroom"); assert ("✅ Классный руководитель", "t_subj_homeroom") in btns(out)
+    assert ("👍 Готово (выбрано 1)", "t_subj_done") in btns(out)
+    out = await press(HR, "t_subj_done"); assert "Как к вам обращаться" in last(out)
+    out = await say(HR, "Евгений Викторович"); t = last(out)
+    assert "Евгений Викторович · классный руководитель" in t and "Мой класс: ещё не выбран" in t, t
+    assert ("👨‍👩‍👧 Я ещё и родитель", "mode_parent") in btns(out)
+    out = await press(HR, "t_new"); assert ("7 класс", "t_new_7") in btns(out) and ("4 класс", "t_new_4") not in btns(out)
+    await press(HR, "t_new_7"); out = await press(HR, "t_name_7_7А"); assert "Вы — его классный руководитель" in last(out)
+    code = json.loads(redis.d[f"tclasses_{HR}"])[0]
+    assert json.loads(redis.d[f"tclass_{code}"])["homeroom"] == HR
+    out = await press(HR, "t_menu"); assert ("🏠 Мой класс · 7А", f"t_cls_{code}") in btns(out) and "Мой класс (классный руководитель)" in last(out)
+    # второй свой класс не создать: другой класс уже без классного руководства
+    await press(HR, "t_new_8"); out = await press(HR, "t_name_8_8А"); assert "классный руководитель" not in last(out).split("\n")[0]
+    code8 = [c for c in json.loads(redis.d[f"tclasses_{HR}"]) if c != code][0]
+    assert json.loads(redis.d[f"tclass_{code8}"])["homeroom"] is None
+    # ученик вступает; классный руководитель видит полный отчёт и родителей класса
+    await say(KID, "/start"); await say(KID, "Дима"); await press(KID, "grade_7"); await say(KID, f"/join {code}")
+    out = await press(HR, f"t_cls_{code}"); assert ("👨‍👩‍👧 Родители класса", f"t_par_{code}") in btns(out)
+    assert "Евгений Викторович (классный руководитель)" in last(out)
+    out = await press(HR, f"t_rep_{code}_{KID}"); assert last(out).startswith("📊 Дима, 7 класс"), last(out)
+    out = await press(HR, f"t_par_{code}"); assert "• Дима: родитель не подключён" in last(out) and "у 0 из 1" in last(out)
+    # предметник подключается по коду — он не классный руководитель: только свой предмет, родителей не видит
+    await say(PE, "/teacher"); await press(PE, "t_kind_subject"); await press(PE, "t_subj_phys"); await press(PE, "t_subj_done")
+    await say(PE, "Олег Сергеевич"); await press(PE, "t_link"); out = await say(PE, code)
+    assert "✅ Вы подключились к классу «7А»." in last(out) and "Вы — его классный руководитель" not in last(out)
+    out = await press(PE, f"t_rep_{code}_{KID}"); assert last(out).startswith("📊 Дима — Физика")
+    out = await press(PE, f"t_par_{code}"); assert "Кабинет учителя" in last(out)
+    # второй классный руководитель к тому же классу: без своих предметов — не пустит, класс уже с руководителем
+    await say(T6, "/teacher"); await press(T6, "t_kind_subject"); await press(T6, "t_subj_homeroom"); await press(T6, "t_subj_done")
+    await say(T6, "Ирина Павловна"); await press(T6, "t_link"); out = await say(T6, code)
+    assert "ваших предметов в нём нет" in last(out) and json.loads(redis.d[f"tclass_{code}"])["homeroom"] == HR
+    # к классу без руководителя — станет им
+    await press(T6, "t_link"); out = await say(T6, code8); assert "Вы — его классный руководитель" in last(out)
+    assert json.loads(redis.d[f"tclass_{code8}"])["homeroom"] == T6
+    # тот же учитель — родитель своего ребёнка: режим родителя, код, ребёнок подключает
+    out = await press(HR, "mode_parent"); assert "Ваш код:" in last(out) and ("↩️ Я не родитель", "parent_cancel") in btns(out)
+    out = await press(HR, "parent_cancel"); assert "Кабинет учителя" in last(out)             # передумал — обратно в кабинет
+    out = await press(HR, "mode_parent"); fcode = redis.d[f"fcode_of_{HR}"]
+    await say(KID2, "/start"); await say(KID2, "Артём"); await press(KID2, "grade_4"); await say(KID2, f"/family {fcode}")
+    out = await press(HR, "mode_parent"); assert "Родительский раздел" in last(out) and "• Артём, 4 класс" in last(out)
+    assert ("👩‍🏫 Режим учителя", "mode_teacher") in btns(out) and ("🔄 Сменить роль", "role_switch") not in btns(out)
+    out = await say(HR, "/start"); assert "Родительский раздел" in last(out)              # помнит, где был
+    out = await press(HR, "mode_teacher"); assert "Кабинет учителя" in last(out) and "7А" in last(out)
+    assert ("👨‍👩‍👧 Режим родителя", "mode_parent") in btns(out)
+    out = await say(HR, "/start"); assert "Кабинет учителя" in last(out)
+    h = UserHandler(api, db, redis)
+    assert await h._children_of(HR) == [KID2] and await h.roles_of(HR) == ["teacher", "parent"]   # ничего не потерялось
+    # просто родитель видит «Я ещё и учитель»
+    code_p = (await A.parent_code(KID))["code"]; await A.link_parent(P, code_p)
+    out = await press(P, "parent_menu"); assert ("👩‍🏫 Я ещё и учитель", "mode_teacher") in btns(out)
+    assert "• Дима: подключено родителей — 1" in last(await press(HR, f"t_par_{code}"))
+    # мини-приложение: роли, переключатель, кабинет с «Мой класс», родители класса, отчёт по правам
+    st = await A.state(HR); assert st["role"] == "teacher" and st["roles"] == ["teacher", "parent"]
+    st = await A.set_mode(HR, "parent"); assert st["role"] == "parent" and [k["id"] for k in st["children"]] == [KID2]
+    st = await A.set_mode(HR, "teacher"); assert st["role"] == "teacher"
+    await fails(A.set_mode(HR, "admin"))
+    st = await A.state(P); assert st["role"] == "parent" and st["roles"] == ["parent"]
+    home = await A.teacher_home(HR)
+    assert home["profile"]["homeroom"] and home["profile"]["homeroom_ok"] and home["classes"][0]["homeroom"] and home["classes"][0]["code"] == code
+    cls = await A.teacher_class(HR, code); assert cls["homeroom"] and cls["parents"] == [{"id": KID, "name": "Дима", "parents": 1}]
+    assert [t["name"] for t in cls["teachers"] if t["homeroom"]] == ["Евгений Викторович"]
+    cls = await A.teacher_class(PE, code); assert not cls["homeroom"] and cls["parents"] is None
+    assert (await A.teacher_student(PE, code, KID))["report"].startswith("📊 Дима — Физика")
+    assert (await A.teacher_student(HR, code, KID))["report"].startswith("📊 Дима, 7 класс")
+    await fails(A.teacher_profile(PE, "subject", [], "Олег Сергеевич"))
+    home = await A.teacher_profile(PE, "subject", [], "Олег Сергеевич", True); assert home["profile"]["homeroom"] and home["profile"]["subjects"] == []
+    st = await A.set_mode(PE, "parent"); assert st["role"] == "parent" and st["children"] == [] and "parent" in st["roles"]   # «Я ещё и родитель»
+    # предметник отключился — классный руководитель уходит из класса вместе с ним
+    out = await press(T6, f"t_unlink_{code8}"); assert "Вы отключились от класса" in last(out)
+    assert json.loads(redis.d[f"tclass_{code8}"])["homeroom"] is None
+    assert not WIDE, sorted({tuple(r) for r in WIDE})
+    print("   Роли: учитель + родитель в одном аккаунте, переключатель, классный руководитель, права предметника: OK")
 
 
 async def test_lighthouse():
@@ -2931,6 +3024,7 @@ asyncio.run(test_savings())
 asyncio.run(test_consent())
 asyncio.run(test_teacher())
 asyncio.run(test_family_and_class_extras())
+asyncio.run(test_roles_and_homeroom())
 asyncio.run(test_lighthouse())
 asyncio.run(test_chest())
 asyncio.run(test_lightning())

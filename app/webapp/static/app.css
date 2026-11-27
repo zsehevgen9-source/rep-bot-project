@@ -565,3 +565,7 @@ textarea.input { width: 100%; resize: vertical; font: inherit; }
 .list > * { min-width: 0; }
 /* когда открыт лист снизу — подсказка сверху, чтобы не закрывать кнопки */
 body:has(.sheet) .toast { bottom: auto; top: calc(16px + env(safe-area-inset-top)); }
+
+/* переключатель «Учитель / Родитель» вверху экрана */
+.segs.mode-switch { margin: 0 0 12px; }
+.segs.mode-switch .seg { font-size: 15px; padding: 12px 4px; min-height: 44px; }

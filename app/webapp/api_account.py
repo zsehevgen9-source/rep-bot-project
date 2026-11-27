@@ -184,6 +184,19 @@ class AccountMixin:
         async with self._handler() as h:
             return {"code": await h.family_code(uid)}
 
+    async def set_mode(self, uid: int, mode: Any) -> Dict[str, Any]:
+        """Переключатель «Учитель / Родитель». Второй роли ещё нет — добавляем её: родителю дадим код для
+        ребёнка, учителю откроем кабинет. Ничего не удаляется."""
+        from app.webapp.api import ApiError
+        if mode not in ("teacher", "parent"):
+            raise ApiError(400, "Неизвестный режим")
+        async with self._handler() as h:
+            await h.set_mode(self._quiet(h, uid), mode)
+            if mode not in await h.roles_of(uid):
+                raise ApiError(400, self._last_note(h, "Кабинет учителя пока закрыт"), "pending")
+            await h.remember_mode(uid, mode)
+        return await self.state(uid)
+
     async def role_switch(self, uid: int) -> Dict[str, Any]:
         """🔄 Сменить роль: учитель/родитель → снова «Кто ты?» (классы учителя сохраняются)."""
         async with self._handler() as h:

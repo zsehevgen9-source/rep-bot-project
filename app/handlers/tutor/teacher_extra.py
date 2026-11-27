@@ -185,8 +185,9 @@ class TeacherExtrasMixin:
     # ---------- 🗺 карта класса по темам ----------
 
     async def class_map(self, data: Dict[str, Any], uid: int) -> Dict[str, Any]:
-        """Ученик × тема: статус каждой темы (знает / изучает / подтянуть) по предметам учителя."""
-        mine = set(await self._my_subjects(data, uid))
+        """Ученик × тема: статус каждой темы (знает / изучает / подтянуть) по предметам учителя
+        (у классного руководителя — по всем предметам класса)."""
+        mine = set(await self._view_subjects(data, uid))
         per_student, count, last = [], {}, {}
         for student in data["students"]:
             profile = await self._load_profile(student)

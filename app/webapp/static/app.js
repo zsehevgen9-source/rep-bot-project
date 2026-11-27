@@ -282,6 +282,7 @@
       setBack(null); confetti(); await load();
     };
     page(
+      modeSwitch(S.data),
       el("div", { class: "section-head", style: "margin-top:4px" }, el("h2", { style: "font-size:24px" }, "👨‍👩‍👧 Код для ребёнка")),
       el("div", { class: "card", style: "text-align:center" },
         el("p", { class: "muted" }, "Продиктуйте ребёнку этот код:"),
@@ -1027,6 +1028,7 @@
   function renderKids(d) {
     if (d.role === "parent" && !d.children.length) return parentOnboarding();
     page(
+      modeSwitch(d),
       el("div", { class: "hero" },
         helpButton(true),
         el("div", { class: "kicker" }, "Маячок · для родителей"),
@@ -1050,7 +1052,8 @@
         el("button", { class: "btn secondary", onclick: parentOnboarding }, "➕ Ещё ребёнок"),
         el("button", { class: "btn secondary", onclick: showPrivacy }, "📄 Политика")),
       d.role === "parent" ? themePicker(() => renderKids(d)) : null,
-      d.role === "parent" ? el("div", { class: "section" }, el("button", { class: "btn secondary", onclick: () => switchRole("parent") }, "🔄 Сменить роль")) : null,
+      d.role === "parent" ? el("div", { class: "section btn-row" }, addRoleButton(d, "teacher"),
+        hasBoth(d) ? null : el("button", { class: "btn secondary", onclick: () => switchRole("parent") }, "🔄 Сменить роль")) : null,
       d.children.length && d.role !== "student" ? el("div", { class: "section" }, el("button", { class: "btn secondary danger", onclick: () => {
         let close;
         close = sheet(el("h2", {}, "Отключиться от ребёнка"), el("div", { class: "list", style: "margin-top:10px" }, d.children.map((c) => el("button", {
@@ -1534,32 +1537,46 @@
     let t;
     try { t = await api("/api/teacher"); } catch (e) { page(el("div", { class: "empty" }, e.message)); return; }
     if (!t.profile.kind || !t.profile.name) return teacherSetup(t);
+    const title = (id) => (t.subject_options.find((o) => o.id === id) || {}).title;
+    const what = t.profile.kind === "primary" ? ["Начальные классы", "классный руководитель"]
+      : [...(t.profile.homeroom ? ["Классный руководитель"] : []), ...t.profile.subjects.map(title)];
+    const own = t.classes.filter((c) => c.homeroom), other = t.classes.filter((c) => !c.homeroom);
+    const classItem = (c, meta) => el("button", { class: "item", onclick: () => openClass(c.code) },
+      el("div", { class: "ico", style: tint(c.homeroom ? "#0f766e" : "#4f46e5") }, c.grade),
+      el("div", { class: "body" }, el("div", { class: "title" }, c.name), el("div", { class: "meta" }, meta)),
+      el("span", { class: "go" }, "›"));
     page(
+      modeSwitch(S.data),
       el("div", { class: "hero" },
         el("button", { class: "gear", "aria-label": "Профиль", onclick: () => teacherSetup(t) }, "⚙️"),
         helpButton(),
         el("div", { class: "kicker" }, "Маячок · кабинет учителя"),
         el("h1", {}, t.profile.name),
-        el("p", { class: "sub" }, t.profile.kind === "primary" ? "Начальные классы" : t.profile.subjects.map((x) => (t.subject_options.find((o) => o.id === x) || {}).title).join(", ")),
+        el("p", { class: "sub" }, what.join(", ")),
         mascot("wink")),
+      own.length || t.profile.homeroom_ok ? el("div", { class: "section" },
+        el("div", { class: "section-head" }, el("h2", {}, "🏠 Мой класс"), el("span", { class: "note" }, "классный руководитель")),
+        own.length ? el("div", { class: "list" }, own.map((c) => classItem(c, `учеников: ${c.students} · код ${c.code}`)))
+          : el("div", { class: "card empty" }, el("p", {}, "Свой класс ещё не выбран. Создайте его или подключитесь по коду, если класс уже есть в Маячке — вы станете его классным руководителем."),
+            el("div", { class: "btn-row", style: "margin-top:10px" },
+              el("button", { class: "btn", onclick: () => newClassSheet(t) }, "➕ Создать"),
+              el("button", { class: "btn secondary", onclick: linkClassSheet }, "🔑 По коду")))) : null,
       el("div", { class: "section" },
-        el("div", { class: "section-head" }, el("h2", {}, "Мои классы"), el("span", { class: "note" }, t.classes.length ? `${t.classes.length}` : "")),
-        t.classes.length ? el("div", { class: "list" }, t.classes.map((c) => el("button", { class: "item", onclick: () => openClass(c.code) },
-          el("div", { class: "ico", style: tint("#4f46e5") }, c.grade),
-          el("div", { class: "body" }, el("div", { class: "title" }, c.name),
-            el("div", { class: "meta" }, `учеников: ${c.students} · заданий: ${c.assignments} · код ${c.code}`)),
-          el("span", { class: "go" }, "›"))))
-          : el("div", { class: "card empty" }, "Классов пока нет. Создайте класс — ученики вступят по коду." +
-            (t.profile.kind === "subject" ? " Предметники обычно ведут 3–4 класса — добавьте каждый." : ""))),
+        el("div", { class: "section-head" }, el("h2", {}, t.profile.homeroom_ok ? "📐 Мои предметы" : "Мои классы"), el("span", { class: "note" }, other.length ? `${other.length}` : "")),
+        other.length ? el("div", { class: "list" }, other.map((c) => classItem(c, (c.subjects ? `${c.subjects} · ` : "") + `${c.students} уч. · код ${c.code}`)))
+          : el("div", { class: "card empty" }, t.profile.homeroom_ok && own.length
+            ? "Классы, где вы ведёте предмет, появятся здесь. Подключитесь к классу по коду."
+            : "Классов пока нет. Создайте класс — ученики вступят по коду." + (t.profile.kind === "subject" ? " Предметники обычно ведут 3–4 класса — добавьте каждый." : ""))),
       el("div", { class: "btn-row" },
         el("button", { class: "btn", onclick: () => newClassSheet(t) }, "➕ Создать класс"),
         el("button", { class: "btn secondary", onclick: linkClassSheet }, "🔑 По коду")),
       el("p", { class: "muted", style: "margin:14px 4px 0;font-size:14px" }, "Если класс уже создал другой учитель (например, классный руководитель), подключитесь к нему по коду — ученикам не нужно вступать заново."),
+      el("div", { class: "section" }, addRoleButton(S.data, "parent")),
     );
   }
 
   function teacherSetup(t) {
-    const st = { kind: t.profile.kind, subjects: t.profile.subjects.slice(), name: t.profile.name };
+    const st = { kind: t.profile.kind, subjects: t.profile.subjects.slice(), name: t.profile.name, homeroom: !!t.profile.homeroom };
     setBack(t.profile.kind && t.profile.name ? () => { setBack(null); renderTeacher(); } : null);
     const draw = () => {
       const nameInput = el("input", { class: "input big", placeholder: "Например: Мария Ивановна", maxlength: "40", value: st.name });
@@ -1570,11 +1587,15 @@
         el("div", { class: "btn-row" },
           el("button", { class: "btn" + (st.kind === "primary" ? "" : " secondary"), onclick: () => { st.kind = "primary"; draw(); } }, "🧸 Начальные"),
           el("button", { class: "btn" + (st.kind === "subject" ? "" : " secondary"), onclick: () => { st.kind = "subject"; draw(); } }, "📐 Предметник")),
-        st.kind === "subject" ? el("div", { class: "section" }, el("div", { class: "label-s" }, "Ваши предметы"),
-          el("div", { class: "picker", style: "margin-top:8px" }, t.subject_options.map((o) => el("button", {
-            class: "chip" + (st.subjects.includes(o.id) ? " gold" : ""),
-            onclick: () => { st.subjects = st.subjects.includes(o.id) ? st.subjects.filter((x) => x !== o.id) : [...st.subjects, o.id]; draw(); },
-          }, o.title)))) : null,
+        st.kind === "subject" ? el("div", { class: "section" }, el("div", { class: "label-s" }, "Что вы ведёте?"),
+          el("p", { class: "muted", style: "margin:4px 0 0;font-size:14px" }, "Есть свой класс — отметьте «Классный руководитель». Можно без предметов."),
+          el("div", { class: "picker", style: "margin-top:8px" },
+            el("button", { class: "chip" + (st.homeroom ? " gold" : ""), "aria-pressed": String(st.homeroom), onclick: () => { st.homeroom = !st.homeroom; draw(); } }, "🏠 Классный руководитель"),
+            t.subject_options.map((o) => el("button", {
+              class: "chip" + (st.subjects.includes(o.id) ? " gold" : ""), "aria-pressed": String(st.subjects.includes(o.id)),
+              onclick: () => { st.subjects = st.subjects.includes(o.id) ? st.subjects.filter((x) => x !== o.id) : [...st.subjects, o.id]; draw(); },
+            }, o.title)))) : null,
+        st.kind === "primary" ? el("p", { class: "muted", style: "margin:10px 4px 0;font-size:14px" }, "Учитель начальных классов — классный руководитель своего класса.") : null,
         el("div", { class: "section" }, el("div", { class: "label-s" }, "Как к вам обращаться ученикам?"), nameInput),
         el("div", { class: "section" }, el("button", { class: "btn", onclick: async () => {
           try { await api("/api/teacher/profile", st); setBack(null); toast("Профиль сохранён ✅"); renderTeacher(); } catch (e) { toast(e.message); }
@@ -1583,6 +1604,38 @@
         el("div", { class: "section" }, el("button", { class: "btn secondary", onclick: () => switchRole("teacher") }, "🔄 Сменить роль")));
     };
     draw();
+  }
+
+  // 🔀 Учитель и родитель в одном аккаунте. Обе роли есть — переключатель сверху экрана; одна — кнопка
+  // «Я ещё и …», которая добавит вторую. Переключение ничего не удаляет: классы и дети остаются.
+  function hasBoth(d) { return !!d && (d.roles || []).includes("teacher") && (d.roles || []).includes("parent"); }
+  function setMode(mode) {
+    const d = S.data || {};
+    const run = async () => {
+      try { S.data = await api("/api/mode", { mode }); } catch (e) { return toast(e.message, 3500); }
+      S.child = null; S.quiz = null; setBack(null); window.scrollTo(0, 0); render();
+    };
+    if ((d.roles || []).includes(mode)) return run();
+    let close;
+    close = sheet(el("h2", {}, mode === "parent" ? "👨‍👩‍👧 Вы ещё и родитель?" : "👩‍🏫 Вы ещё и учитель?"),
+      el("p", { class: "muted", style: "margin:6px 0 14px" }, mode === "parent"
+        ? "Подключим вас к занятиям вашего ребёнка. Кабинет учителя и классы останутся — переключаться можно вверху экрана."
+        : "Откроем кабинет учителя. Дети и отчёты останутся — переключаться можно вверху экрана."),
+      el("div", { class: "btn-row" }, el("button", { class: "btn secondary", onclick: () => close() }, "Отмена"),
+        el("button", { class: "btn", onclick: () => { close(); run(); } }, "Да")));
+  }
+  function modeSwitch(d) {
+    if (!d || !hasBoth(d) || !["teacher", "parent"].includes(d.role)) return null;
+    const seg = (mode, title) => el("button", {
+      class: "seg" + (d.role === mode ? " active" : ""), "aria-pressed": String(d.role === mode),
+      onclick: () => { if (d.role !== mode) setMode(mode); },
+    }, title);
+    return el("div", { class: "segs mode-switch", role: "group", "aria-label": "Режим" },
+      seg("teacher", "👩‍🏫 Учитель"), seg("parent", "👨‍👩‍👧 Родитель"));
+  }
+  function addRoleButton(d, mode) {
+    if (!d || hasBoth(d)) return null;
+    return el("button", { class: "btn secondary", onclick: () => setMode(mode) }, mode === "parent" ? "👨‍👩‍👧 Я ещё и родитель" : "👩‍🏫 Я ещё и учитель");
   }
 
   // 🔄 Сменить роль: учитель или родитель снова выбирает «Кто ты?» (классы учителя сохраняются)
@@ -1694,7 +1747,8 @@
       }
       page(
         el("div", { class: "class-head" },
-          el("div", {}, el("h2", {}, c.name), el("div", { class: "muted" }, `${c.grade} класс · ${c.teachers.map((t) => t.name).join(", ")}`)),
+          el("div", {}, el("h2", {}, c.name), el("div", { class: "muted" }, `${c.grade} класс · ${c.teachers.map((t) => t.name + (t.homeroom ? " (кл. руководитель)" : "")).join(", ")}`),
+            c.homeroom ? el("div", { class: "muted", style: "font-size:14px" }, "🏠 Вы классный руководитель: видите все предметы") : null),
           el("button", { class: "code small", onclick: () => toast(`Код класса: ${c.code}`) }, c.code)),
         el("div", { class: "stats" },
           el("div", { class: "stat" }, el("div", { class: "label" }, "Учеников"), el("div", { class: "value", style: "color:var(--indigo)" }, c.students.length)),
@@ -1703,6 +1757,7 @@
         (c.today || []).map((t) => el("div", { class: "card today-topic" },
           el("div", { class: "body" }, el("div", { class: "meta" }, `⚡ Сегодня по программе · ${t.subject}`), el("div", { class: "title" }, t.topic)),
           el("button", { class: "btn small", onclick: () => quick(c, t) }, "Задать"))),
+        c.homeroom ? el("div", { class: "btn-row" }, el("button", { class: "btn secondary small", onclick: () => parentsSheet(c) }, "👨‍👩‍👧 Родители класса")) : null,
         el("div", { class: "btn-row" },
           el("button", { class: "btn secondary small", onclick: () => announceSheet(c) }, "📢 Объявление"),
           el("button", { class: "btn secondary small", onclick: async () => {
@@ -1713,6 +1768,15 @@
         el("div", { class: "section" }, el("button", { class: "btn secondary danger", onclick: () => removeClass(c) }, c.owner ? "🗑 Удалить класс" : "🚪 Отключиться от класса")),
       );
     };
+    function parentsSheet(cls) {
+      const list = cls.parents || [];
+      const withP = list.filter((p) => p.parents).length;
+      sheet(el("h2", {}, "👨‍👩‍👧 Родители " + cls.name),
+        el("p", { class: "muted", style: "margin:6px 0 10px" }, list.length ? `Родители подключены у ${withP} из ${list.length}. Родителя подключает сам ученик: «⚙️ → Родитель».` : "Учеников пока нет."),
+        el("div", { class: "list" }, list.map((p) => el("div", { class: "item flat" },
+          el("div", { class: "ico", style: tint(p.parents ? "#22c55e" : "#9ca3af") }, p.parents || "—"),
+          el("div", { class: "body" }, el("div", { class: "title" }, p.name), el("div", { class: "meta" }, p.parents ? `подключено родителей: ${p.parents}` : "родитель не подключён"))))));
+    }
     async function studentSheet(cls, s) {
       let report = "Загружаю…";
       try { report = (await api(`/api/teacher/student?code=${cls.code}&student=${s.id}`)).report; } catch (e) { report = e.message; }
@@ -1994,8 +2058,8 @@
     role: new URLSearchParams(location.search).get("demo") || "student",   // ?demo=new | teacher | parent — показать другие роли
     state() {
       if (this.role === "new") return { role: "new", children: [], bot_link: "", teacher_pending: false };
-      if (this.role === "teacher") return { role: "teacher", children: [], bot_link: "" };
-      if (this.role === "parent") return { role: "parent", children: [{ id: 1, name: "Маша", grade: 5 }], bot_link: "", alerts: this.alertsOn };
+      if (this.role === "teacher") return { role: "teacher", roles: ["teacher", "parent"], children: [{ id: 1, name: "Маша", grade: 5 }], bot_link: "" };
+      if (this.role === "parent") return { role: "parent", roles: ["teacher", "parent"], children: [{ id: 1, name: "Маша", grade: 5 }], bot_link: "", alerts: this.alertsOn };
       return this.studentState();
     },
     studentState() {
@@ -2096,14 +2160,16 @@
       if (path === "/api/family/code") { this.role = "parent"; return { code: "654321" }; }
       if (path === "/api/family/cancel") { this.role = "new"; return { ok: true }; }
       if (path === "/api/role/switch") { this.role = "new"; return { ok: true }; }
+      if (path === "/api/mode") { this.role = body.mode; return this.state(); }
       if (path === "/api/family/join") { if (body.code !== "654321") throw new Error("Код не подошёл (в демо — 654321)"); this.cfg.parents = [{ id: 3, n: 1, since: "сегодня" }]; return this.cfg; }
       if (path === "/api/parent/unlink") { this.cfg.parents = []; return this.cfg; }
       if (path === "/api/class/join") { this.cfg.tclass = { name: "5А", teachers: ["Анна Петровна"] }; return this.cfg; }
       if (path === "/api/class/leave") { this.cfg.tclass = null; return this.cfg; }
       if (path === "/api/delete_me") { this.role = "new"; return { ok: true }; }
-      if (path === "/api/teacher") return { profile: { kind: "subject", subjects: ["math"], name: "Анна Петровна" }, subject_options: [{ id: "math", title: "Математика" }, { id: "phys", title: "Физика" }],
-        grades: [5, 6, 7, 8, 9, 10, 11], classes: [{ code: "K7M2QX", name: "5А", grade: 5, students: 24, owner: true, assignments: 3 }, { code: "P9W4TR", name: "6Б", grade: 6, students: 22, owner: false, assignments: 1 }] };
-      if (path.startsWith("/api/teacher/class?")) return { code: "K7M2QX", name: "5А", grade: 5, owner: true, teachers: [{ name: "Анна Петровна", what: "Математика" }],
+      if (path === "/api/teacher") return { profile: { kind: "subject", subjects: ["math"], homeroom: true, homeroom_ok: true, name: "Анна Петровна" }, subject_options: [{ id: "math", title: "Математика" }, { id: "phys", title: "Физика" }],
+        grades: [5, 6, 7, 8, 9, 10, 11], classes: [{ code: "K7M2QX", name: "5А", grade: 5, students: 24, owner: true, homeroom: true, subjects: "Математика", assignments: 3 }, { code: "P9W4TR", name: "6Б", grade: 6, students: 22, owner: false, homeroom: false, subjects: "Математика", assignments: 1 }] };
+      if (path.startsWith("/api/teacher/class?")) return { code: "K7M2QX", name: "5А", grade: 5, owner: true, homeroom: true, teachers: [{ name: "Анна Петровна", what: "Математика", homeroom: true }, { name: "Олег Сергеевич", what: "Физкультура", homeroom: false }],
+        parents: [{ id: 2, name: "Даня", parents: 1 }, { id: 3, name: "Ира", parents: 2 }, { id: 1, name: "Маша", parents: 1 }, { id: 4, name: "Тимур", parents: 0 }],
         week: { active: 18, solved: 214 },
         students: [["Маша", 6, 31, 4.6, 1], ["Даня", 4, 18, 4.0, 2], ["Ира", 7, 40, 4.8, 0], ["Тимур", 1, 3, null, 3]].map(([name, days, solved, avg_mark, weak], i) => ({ id: i + 1, name, days, solved, avg_mark, weak, streak: days })),
         weak: [{ subject_id: "math", subject: "Математика", topic: "Сложение дробей", count: 7 }, { subject_id: "math", subject: "Математика", topic: "Проценты", count: 4 }],

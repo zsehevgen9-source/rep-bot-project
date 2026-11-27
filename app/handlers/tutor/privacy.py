@@ -73,6 +73,48 @@ class PrivacyMixin:
         await self.redis.set_state(f"awaiting_name_{uid}", "true", ex=3600)
         await self._send_with_voice(message, "Отлично! 🎒 Давай познакомимся: как тебя зовут?")
 
+    # ---------- 🔀 режим: учитель или родитель ----------
+    # Учитель может быть и родителем (его дети учатся в той же школе). Роли складываются, а режим только
+    # выбирает, какой раздел показать: mode_<id> = teacher | parent. Переключение ничего не удаляет.
+
+    async def roles_of(self, uid: int) -> List[str]:
+        roles = []
+        if await self._is_teacher(uid, explicit=True):
+            roles.append("teacher")
+        if await self._children_of(uid) or await self.redis.get_state(f"is_parent_{uid}"):
+            roles.append("parent")
+        return roles
+
+    async def current_mode(self, uid: int) -> str:
+        """Режим из прошлого раза; если такой роли уже нет — первая из имеющихся (учитель раньше родителя)."""
+        roles = await self.roles_of(uid)
+        mode = await self.redis.get_state(f"mode_{uid}")
+        if mode in roles:
+            return mode
+        return roles[0] if roles else ""
+
+    async def remember_mode(self, uid: int, mode: str) -> None:
+        if await self.redis.get_state(f"mode_{uid}") != mode:
+            await self.redis.set_state(f"mode_{uid}", mode)
+
+    async def mode_rows(self, uid: int, here: str) -> List[List[Dict[str, str]]]:
+        """Кнопка перехода в другой режим. Если второй роли ещё нет — «Я ещё и …» (роль добавится)."""
+        roles = await self.roles_of(uid)
+        if here == "teacher":
+            label = "👨‍👩‍👧 Режим родителя" if "parent" in roles else "👨‍👩‍👧 Я ещё и родитель"
+            return [[_btn(label, "mode_parent")]]
+        label = "👩‍🏫 Режим учителя" if "teacher" in roles else "👩‍🏫 Я ещё и учитель"
+        return [[_btn(label, "mode_teacher")]]
+
+    async def set_mode(self, message: NormalizedMessage, mode: str) -> None:
+        uid = message.user_id
+        await self._reset_modes(uid)
+        if mode == "parent":
+            await self.remember_mode(uid, "parent")
+            await self.show_parent_menu(message)     # детей ещё нет — покажет код для ребёнка
+        else:
+            await self.choose_teacher(message)       # откроет кабинет (или отправит запрос администратору)
+
     # ---------- 🔄 сменить роль (учитель или родитель → снова выбор «Кто ты?») ----------
 
     def _env_teacher(self, uid: int) -> bool:
@@ -113,7 +155,7 @@ class PrivacyMixin:
         code = await self.redis.get_state(f"fcode_of_{uid}")
         if code:
             await self.redis.delete_state(f"fcode_{code}")
-        for key in ("children", "fcode_of", "is_parent", "awaiting_parent_code"):
+        for key in ("children", "fcode_of", "is_parent", "awaiting_parent_code", "mode"):
             await self.redis.delete_state(f"{key}_{uid}")
         await self._reset_modes(uid)
 

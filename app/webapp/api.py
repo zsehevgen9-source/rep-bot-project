@@ -81,16 +81,16 @@ class MiniAppAPI(AccountMixin, TeacherAPIMixin, ExtrasAPIMixin):
             grade = await h._get_grade(target)
             profile = await h._load_profile(target)
             name = profile.get("name") or await h.redis.get_state(f"name_{target}") or ""
+            roles = await h.roles_of(uid)   # учитель может быть и родителем — переключается сверху экрана
             if child is not None:
                 role = "parent_view"
             elif grade:
                 role = "student"
-            elif await h._is_teacher(uid, explicit=True):
-                role = "teacher"
             else:
-                role = "parent" if kids or await h.redis.get_state(f"is_parent_{uid}") else "new"
+                role = await h.current_mode(uid) or "new"
             result: Dict[str, Any] = {
                 "role": role,
+                "roles": roles,
                 "teacher_pending": bool(await h.redis.get_state(f"teacher_req_{uid}")),
                 "bot_link": self.bot_link(),
                 "children": kids,

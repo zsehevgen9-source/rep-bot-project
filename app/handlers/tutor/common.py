@@ -62,7 +62,7 @@ USER_KEY_PREFIXES = [
     "sched_pending", "last_file", "awaiting_homework", "hw_tasks",
     "pcode_of", "fcode_of", "is_parent", "awaiting_family_code", "goal", "goal_pending", "awaiting_goal_prize", "alerts_off", "alert_idle", "awaiting_tann", "tann", "children", "parent_sched_pending", "awaiting_parent_code", "awaiting_parent_sched",
     "voice_on", "apptest", "cert", "consent",
-    "my_tclass", "asg_now", "asg_photo", "asg_photo_try", "awaiting_join", "awaiting_tclass", "awaiting_tasg", "t_weak", "t_asgopts", "awaiting_tname", "awaiting_tlink", "tprofile", "tclasses",
+    "my_tclass", "asg_now", "asg_photo", "asg_photo_try", "awaiting_join", "awaiting_tclass", "awaiting_tasg", "t_weak", "t_asgopts", "awaiting_tname", "awaiting_tlink", "tprofile", "tclasses", "mode",
     "lh_best", "lh_freeze", "lh_new", "lh_note", "chest", "chest_day", "chest_told", "zap", "zap_best", "interests", "via_ctx", "fc", "fc_sess", "fc_opts", "awaiting_fc_topic", "exvar", "zapapp", "fcapp",
 ]
 # Диагностика в 5–11 классах: обязательные предметы + 2–3 на выбор ученика

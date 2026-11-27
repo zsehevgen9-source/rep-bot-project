@@ -252,6 +252,7 @@ class ParentMixin:
         if not children:
             await self.ask_parent_code(message)
             return
+        await self.remember_mode(uid, "parent")
         lines, rows = [], []
         for child_uid in children[:MAX_PARENTS]:
             profile = await self._load_profile(child_uid)
@@ -263,7 +264,9 @@ class ParentMixin:
             rows.append([_btn(f"🚫 Отключить · {label}", f"parent_leave_{child_uid}")])
         rows.append([_btn("➕ Ещё ребёнок", "parent_start")])
         rows.append([_btn("🔔 Сигналы: " + ("вкл" if await self.alerts_on(uid) else "выкл"), "pr_alerts")])
-        rows.append([_btn("🔄 Сменить роль", "role_switch")])
+        rows += await self.mode_rows(uid, "parent")
+        if "teacher" not in await self.roles_of(uid):   # у учителя-родителя есть переключатель — сброс роли не нужен
+            rows.append([_btn("🔄 Сменить роль", "role_switch")])
         text = (f"{note}\n\n" if note else "") + "👨‍👩‍👧 Родительский раздел\n\n" + "\n".join(lines) + (
             "\n\n📊 — отчёт о занятиях; там же 👏 похвала, 🎯 цель недели с наградой и 💡 как помочь дома.\n"
             "🗓 — расписание уроков за ребёнка. Отчёт за неделю я пришлю сам в воскресенье в 18:00.\n"
