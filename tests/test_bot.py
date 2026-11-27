@@ -2549,6 +2549,11 @@ async def test_app_only():
             assert out[0]["keyboard"]["buttons"] == [[{"type": "link", "text": "📱 Открыть Маячок", "url": URL}]]
         out = await press(KID, "subjects_6"); assert "Маячок теперь работает в приложении" in last(out)   # старые кнопки
         out = await say(T, "/whoami"); assert "Маячок теперь работает" not in last(out)                    # служебная команда
+        out = await say(ADMIN, "/start"); assert "Маячок теперь работает" not in last(out)                 # администратор — чат как раньше
+        out = await say(ADMIN, "/voices"); assert "Маячок теперь работает" not in last(out)
+        vb = [p for _, p in btns(out)]
+        if vb:
+            out = await press(ADMIN, vb[0]); assert "Маячок теперь работает" not in last(out)              # и кнопки команд
         # задание учителя: в приложении у учителя, ученик видит его на главной и начинает
         r = await A.teacher_assign(T, code, "math", "Десятичные дроби"); assert r["note"].startswith("✅ Задание отправлено")
         st = await A.state(KID); assert [(t["topic"], t["teacher"]) for t in st["tasks"]] == [("Десятичные дроби", "Анна Петровна")]

@@ -43,8 +43,11 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
 
     async def app_only_gate(self, message: NormalizedMessage) -> bool:
         """True — сообщение из чата MAX перехвачено: человеку ушла кнопка «Открыть Маячок».
-        Запросы из самого приложения (QuietApi) и служебные команды проходят как обычно."""
+        Запросы из самого приложения (QuietApi) и служебные команды проходят как обычно, а администратор
+        (ADMIN_IDS) работает в чате полностью: команды, их кнопки, демо и проверка бота."""
         if not getattr(settings, "APP_ONLY", False) or getattr(self.api, "in_app", False):
+            return False
+        if message.user_id in settings.admin_ids:
             return False
         command = (message.text or "").strip().lower()
         if not message.is_callback and command.startswith(self.CHAT_COMMANDS):
