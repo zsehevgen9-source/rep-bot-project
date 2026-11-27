@@ -144,6 +144,12 @@ async def miniapp_url(redis, screen: str = "home") -> Optional[str]:
     return f"https://max.ru/{username}?startapp={screen}" if username else None
 
 
+async def miniapp_url_any(redis, screen: str = "home") -> Optional[str]:
+    """Ссылка на мини-приложение, даже если кнопка в меню чата выключена (для режима «только приложение»)."""
+    username = getattr(settings, "MAX_BOT_USERNAME", "") or await redis.get_state("bot_username")
+    return f"https://max.ru/{username}?startapp={screen}" if username else None
+
+
 def _row_fits(buttons: List[Dict[str, str]]) -> bool:
     limit = ROW_LIMITS.get(len(buttons), 0)
     return all(_vis_len(btn["text"]) <= limit for btn in buttons)
@@ -288,4 +294,4 @@ def _reference_core(reference: str) -> str:
     """Эталон без пояснения в скобках: «Пушкин (подходит любой ответ…)» -> «Пушкин»."""
     return re.sub(r"\(.*?\)", "", reference or "").strip()
 
-__all__ = ['asyncio', 'json', 'logging', 'random', 're', 'Any', 'Dict', 'List', 'Optional', 'settings', 'BaseHandler', 'NormalizedMessage', 'ai_client', 'detect_subject', 'get_sdamgia_task', 'ProfileStore', 'load_json', 'weak_topics_for', 'task_bank', 'logger', 'SUBJECTS', 'DEFAULT_TITLES', 'EXAM_NAMES', 'EXAM_BY_GRADE', 'BACK_TEXT', 'MORE_TEXT', 'DAY', 'GRADE_TTL', 'DIAG_TTL', 'SECONDS_PER_QUESTION', 'USER_KEY_PREFIXES', '_btn', '_link', 'miniapp_url', '_back', '_kb', '_in_rows', '_fit_rows', 'button_title', '_row_fits', 'BUTTON_MAX', 'DAY', '_short', '_vis_len', '_options_text', '_options_call', '_options_fit', 'subject_title', 'exam_subjects', '_normalize_answer', '_reference_core', 'topic_progress', 'normalize_answer', 'OPTION_MARKS', 'ORDINALS', 'OPTIONS_MAX_GRADE', '_shuffled', '_option_rows', '_options_voice', 'daily_rules', 'rewards_rules', 'DIAG_PICK_FROM_GRADE', 'FLASHCARDS_FROM_GRADE', 'DIAG_MANDATORY', 'DIAG_PICK_MIN', 'DIAG_PICK_MAX', 'MATH_PARTS', 'MATH_PART_LEVELS', 'exam_word']
+__all__ = ['asyncio', 'json', 'logging', 'random', 're', 'Any', 'Dict', 'List', 'Optional', 'settings', 'BaseHandler', 'NormalizedMessage', 'ai_client', 'detect_subject', 'get_sdamgia_task', 'ProfileStore', 'load_json', 'weak_topics_for', 'task_bank', 'logger', 'SUBJECTS', 'DEFAULT_TITLES', 'EXAM_NAMES', 'EXAM_BY_GRADE', 'BACK_TEXT', 'MORE_TEXT', 'DAY', 'GRADE_TTL', 'DIAG_TTL', 'SECONDS_PER_QUESTION', 'USER_KEY_PREFIXES', '_btn', '_link', 'miniapp_url', 'miniapp_url_any', '_back', '_kb', '_in_rows', '_fit_rows', 'button_title', '_row_fits', 'BUTTON_MAX', 'DAY', '_short', '_vis_len', '_options_text', '_options_call', '_options_fit', 'subject_title', 'exam_subjects', '_normalize_answer', '_reference_core', 'topic_progress', 'normalize_answer', 'OPTION_MARKS', 'ORDINALS', 'OPTIONS_MAX_GRADE', '_shuffled', '_option_rows', '_options_voice', 'daily_rules', 'rewards_rules', 'DIAG_PICK_FROM_GRADE', 'FLASHCARDS_FROM_GRADE', 'DIAG_MANDATORY', 'DIAG_PICK_MIN', 'DIAG_PICK_MAX', 'MATH_PARTS', 'MATH_PART_LEVELS', 'exam_word']

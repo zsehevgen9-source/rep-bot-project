@@ -193,7 +193,25 @@ class MiniAppAPI(AccountMixin, TeacherAPIMixin, ExtrasAPIMixin):
             "weak": weak,
             "today": {"weekday": WEEKDAYS[today.weekday()], "date": today.isoformat(),
                       "lessons": [{"id": sid, "title": subject_title(grade, sid)} for sid in lessons]},
+            "tasks": await self._teacher_tasks(h, uid),
         }
+
+    async def _teacher_tasks(self, h, uid: int) -> List[Dict[str, Any]]:
+        """📝 Задания учителя, которые ученик ещё не сделал (или ждут фото решения) — на главном экране."""
+        code = await h.redis.get_state(f"my_tclass_{uid}")
+        data = await h._tclass(code) if code else None
+        if not data or uid not in data["students"]:
+            return []
+        out = []
+        for task in reversed(data["assignments"][-20:]):
+            r = task["results"].get(str(uid))
+            if r and r.get("photo"):
+                continue
+            out.append({"code": data["code"], "id": task["id"], "topic": task["topic"], "subject_id": task["subject_id"],
+                        "subject": subject_title(data["grade"], task["subject_id"]), "due": task.get("due"),
+                        "teacher": await h._teacher_name(task.get("teacher", data.get("owner"))),
+                        "photo_needed": bool(r)})
+        return out[:5]
 
     # ---------- расписание ----------
 

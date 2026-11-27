@@ -37,7 +37,33 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
                   RewardsMixin, VoiceAdminMixin, TimezoneMixin, ScheduleMixin, LessonMixin,
                   ProgramMixin, HomeworkMixin, ParentMixin, FamilyMixin, DemoMixin, PrivacyMixin, TeacherMixin, TeacherExtrasMixin, LighthouseMixin, ChestMixin, LightningMixin, InterestsMixin, FlashcardsMixin, BaseHandler):
 
+    # ---------- 📱 режим «только приложение»: чат MAX — для уведомлений, занятия — в мини-приложении ----------
+
+    CHAT_COMMANDS = ("/whoami", "/add_teacher", "/del_teacher", "/stats", "/voices", "/demo")
+
+    async def app_only_gate(self, message: NormalizedMessage) -> bool:
+        """True — сообщение из чата MAX перехвачено: человеку ушла кнопка «Открыть Маячок».
+        Запросы из самого приложения (QuietApi) и служебные команды проходят как обычно."""
+        if not getattr(settings, "APP_ONLY", False) or getattr(self.api, "in_app", False):
+            return False
+        command = (message.text or "").strip().lower()
+        if not message.is_callback and command.startswith(self.CHAT_COMMANDS):
+            return False
+        url = getattr(self.api, "app_url", "") or await miniapp_url_any(self.redis)
+        text = ("📱 Маячок теперь работает в приложении.\n\n"
+                "Там всё: уроки и задания, тренажёр и игры, отчёты для родителей, кабинет учителя. "
+                "Сюда, в чат, я буду присылать только напоминания и задания.")
+        if url:
+            await self.api.send_message(chat_id=message.chat_id, user_id=message.user_id, text=text + "\n\nНажмите кнопку ниже 👇",
+                                        keyboard=_kb([[_link("📱 Открыть Маячок", url)]]))
+        else:
+            await self.api.send_message(chat_id=message.chat_id, user_id=message.user_id,
+                                        text=text + "\n\nНажмите кнопку «Открыть» внизу этого чата.")
+        return True
+
     async def handle_message(self, message: NormalizedMessage):
+        if await self.app_only_gate(message):
+            return
         # Голосовое сообщение: распознаём и дальше работаем с ним как с обычным текстом
         if message.audio_url and not (message.text or "").strip():
             recognized = await self._voice_to_text(message)
@@ -419,6 +445,8 @@ class UserHandler(CoreMixin, MenuMixin, TasksMixin, SubjectTestMixin, Diagnostic
         await self.redis.set_state(uid, f"history_{json.dumps(history, ensure_ascii=False)}", ex=3600)
 
     async def handle_callback(self, message: NormalizedMessage):
+        if await self.app_only_gate(message):
+            return
         payload = message.payload or ""
         uid = message.user_id
         name = await self.redis.get_state(f"name_{uid}") or "друг"

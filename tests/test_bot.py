@@ -2520,6 +2520,48 @@ async def test_roles_and_homeroom():
     print("   Роли: учитель + родитель в одном аккаунте, переключатель, классный руководитель, права предметника: OK")
 
 
+async def test_app_only():
+    """📱 Только приложение: чат MAX отвечает кнопкой «Открыть Маячок», уведомления — с той же кнопкой,
+    а в самом приложении всё работает как раньше; задания учителя видны на главном экране ученика."""
+    from contextlib import asynccontextmanager
+    from app.webapp.api import MiniAppAPI
+    from app.services.app_links import app_keyboard, APP_BUTTON
+    @asynccontextmanager
+    async def session_factory():
+        yield db
+    A = MiniAppAPI(lambda session: UserHandler(api, session, redis), session_factory, "mayachok_bot")
+    URL = "https://max.ru/mayachok_bot?startapp=home"
+    kb = {"buttons": [[{"type": "callback", "text": "📝 Начать", "payload": "asg_X_1"}], [{"type": "link", "text": "Сайт", "url": "https://a.b"}]]}
+    assert app_keyboard(kb, URL) == {"buttons": [[{"type": "link", "text": APP_BUTTON, "url": URL}], [{"type": "link", "text": "Сайт", "url": "https://a.b"}]]}
+    assert app_keyboard(None, URL) == {"buttons": [[{"type": "link", "text": APP_BUTTON, "url": URL}]]}
+    T, KID = 9881, 9882
+    await say(ADMIN, f"/add_teacher {T}")
+    await say(T, "/teacher"); await press(T, "t_kind_subject"); await press(T, "t_subj_math"); await press(T, "t_subj_done")
+    await say(T, "Анна Петровна"); await press(T, "t_new_6"); await press(T, "t_name_6_6А")
+    code = json.loads(redis.d[f"tclasses_{T}"])[0]
+    await say(KID, "/start"); await say(KID, "Лиза"); await press(KID, "grade_6"); await say(KID, f"/join {code}")
+    redis.d["bot_username"] = "mayachok_bot"
+    settings.APP_ONLY = True
+    try:
+        for text in ("/start", "привет", "помоги с дробями"):
+            out = await say(KID, text)
+            assert len(out) == 1 and "Маячок теперь работает в приложении" in out[0]["text"]
+            assert out[0]["keyboard"]["buttons"] == [[{"type": "link", "text": "📱 Открыть Маячок", "url": URL}]]
+        out = await press(KID, "subjects_6"); assert "Маячок теперь работает в приложении" in last(out)   # старые кнопки
+        out = await say(T, "/whoami"); assert "Маячок теперь работает" not in last(out)                    # служебная команда
+        # задание учителя: в приложении у учителя, ученик видит его на главной и начинает
+        r = await A.teacher_assign(T, code, "math", "Десятичные дроби"); assert r["note"].startswith("✅ Задание отправлено")
+        st = await A.state(KID); assert [(t["topic"], t["teacher"]) for t in st["tasks"]] == [("Десятичные дроби", "Анна Петровна")]
+        t0 = st["tasks"][0]
+        r = await A.chat_open(KID, "asg", {"code": t0["code"], "aid": t0["id"]})
+        assert any("Вопрос" in m["text"] for m in r["messages"]), r["messages"][-1]
+        assert (await A.state(KID))["role"] == "student"                                                  # приложение — как раньше
+    finally:
+        settings.APP_ONLY = False
+    out = await say(KID, "/start"); assert "Маячок теперь работает" not in last(out)                       # выключили — чат как раньше
+    print("   Только приложение: чат отвечает кнопкой «Открыть Маячок», задания учителя на главной ученика: OK")
+
+
 async def test_lighthouse():
     """«🗼 Мой маяк»: серия, заморозка раз в неделю, этапы стройки и картинка маяка."""
     from datetime import date
@@ -3025,6 +3067,7 @@ asyncio.run(test_consent())
 asyncio.run(test_teacher())
 asyncio.run(test_family_and_class_extras())
 asyncio.run(test_roles_and_homeroom())
+asyncio.run(test_app_only())
 asyncio.run(test_lighthouse())
 asyncio.run(test_chest())
 asyncio.run(test_lightning())

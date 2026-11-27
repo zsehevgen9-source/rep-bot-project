@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 import aiohttp
 
 from app.core.config import settings
+from app.services.app_links import app_keyboard
 from app.services.formatting import MAX_TEXT, to_html
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,9 @@ class MaxApiError(Exception):
 
 
 class MaxApiClient:
+    # Ссылка на мини-приложение (https://max.ru/<бот>?startapp=home) — main.py узнаёт имя бота при запуске
+    app_url: str = ""
+
     def __init__(
         self,
         token: Optional[str] = None,
@@ -101,6 +105,8 @@ class MaxApiClient:
             pretty = to_html(text)
             if pretty != html.escape(text, quote=False) and len(pretty) <= MAX_TEXT:
                 payload = {"text": pretty, "format": "html"}
+        if getattr(settings, "APP_ONLY", False) and self.app_url and user_id not in settings.admin_ids:
+            keyboard = app_keyboard(keyboard, self.app_url)   # каждое уведомление открывает приложение
         all_attachments = list(attachments or [])
         if keyboard:
             all_attachments.append({"type": "inline_keyboard", "payload": keyboard})

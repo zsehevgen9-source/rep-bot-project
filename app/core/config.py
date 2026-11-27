@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     WEBAPP_PORT: int = 8080
     MINIAPP_BUTTON: bool = False
     MAX_BOT_USERNAME: str = ""
+    # Только приложение: в чате MAX бот не ведёт занятий — на любое сообщение отвечает кнопкой «📱 Открыть Маячок»,
+    # а уведомления (задание дня, задания учителя, отчёты родителям) приходят коротко, с той же кнопкой.
+    # false — вернуть всё в чат как раньше
+    APP_ONLY: bool = True
     IMAGE_CARDS: bool = True
 
     # --- Администраторы ---

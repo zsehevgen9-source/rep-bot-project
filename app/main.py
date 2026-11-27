@@ -126,6 +126,7 @@ async def start_miniapp():
                 logger.warning("Не удалось узнать имя бота (GET /me): %s", e)
         if username:
             await redis_client.set_state("bot_username", username)
+            max_api.app_url = f"https://max.ru/{username}?startapp=home"
             logger.info("Ссылка на бота: https://max.ru/%s", username)
         api = MiniAppAPI(lambda session: UserHandler(max_api, session, redis_client), AsyncSessionLocal, username)
         return await start_webapp(api, settings.MAX_BOT_TOKEN.get_secret_value(), settings.WEBAPP_PORT)

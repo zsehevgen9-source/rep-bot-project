@@ -18,6 +18,8 @@ class QuietApi:
     а копятся в out (текст и кнопки) — приложение показывает их у себя. Уведомления другим людям уходят как обычно.
     Фото, присланные из приложения, лежат в Redis (appimg_<id>) — бот читает их по адресу «appimg:<id>»."""
 
+    in_app = True   # запрос из мини-приложения: режим «только приложение» его не перехватывает
+
     def __init__(self, real, uid: int, chat_id: Optional[int] = None, redis=None):
         self.real, self.uid, self.chat_id, self.redis = real, uid, chat_id, redis
         self.notes: List[str] = []
@@ -328,6 +330,8 @@ class AccountMixin:
                 if not state or not state.get("done") or not 0 <= params["n"] < len(state["answers"]):
                     raise ApiError(409, "Этот тест уже устарел.", "expired")
                 await h.fix_test_question(message, params["n"])
+            elif action == "asg" and isinstance(params.get("code"), str) and params.get("aid"):
+                await h.start_assignment(message, params["code"], str(params["aid"]))   # задание учителя
             elif action == "homework":
                 await h.ask_homework(message)
             elif action == "today":

@@ -684,6 +684,16 @@
     page(
       heroBlock(d, `${hello}, ${d.name || "друг"}!`, lessons.length ? "Готов закрепить сегодняшние уроки?" : "Чем займёмся сегодня?", "happy"),
       statTiles(d),
+      (d.tasks || []).length ? el("div", { class: "section" },
+        el("div", { class: "section-head" }, el("h2", {}, "📝 Задания учителя"), el("span", { class: "note" }, `${d.tasks.length}`)),
+        el("div", { class: "list" }, d.tasks.map((t) => {
+          const [ico, color] = subjIcon(t.subject_id);
+          return el("button", { class: "item", onclick: () => chatAction("asg", { code: t.code, aid: t.id }) },
+            el("div", { class: "ico", style: tint(color) }, ico),
+            el("div", { class: "body" }, el("div", { class: "title" }, t.topic),
+              el("div", { class: "meta" }, t.photo_needed ? "📸 Пришли фото решения" : t.subject + (t.due ? ` · до ${t.due.slice(8, 10)}.${t.due.slice(5, 7)}` : ` · ${t.teacher}`))),
+            el("span", { class: "go" }, "›"));
+        }))) : null,
       d.goal ? el("div", { class: "section" }, goalCard(d.goal, false)) : null,
       d.games ? chestBanner(d.games.chest) : null,
       d.games ? el("div", { class: "section" }, lighthouseCard(d.games.lighthouse)) : null,
@@ -2091,6 +2101,7 @@
         due: [{ subject: "Математика", subject_id: "math", topic: "Обыкновенные дроби", weak: true },
           { subject: "Русский язык", subject_id: "rus", topic: "Безударные гласные", weak: false }],
         weak: [{ subject: "Математика", subject_id: "math", topic: "Обыкновенные дроби" }],
+        tasks: [{ code: "K7M2QX", id: "3", topic: "Сложение дробей", subject_id: "math", subject: "Математика", teacher: "Анна Петровна", due: "2026-12-03", photo_needed: false }],
         today: { weekday: days[todayIdx], lessons: [{ id: "math", title: "Математика" }, { id: "rus", title: "Русский язык" }, { id: "eng", title: "Английский язык" }] },
         games: {
           lighthouse: { streak: 5, best: 8, freeze: true, today: false, at_risk: false, built: 4, stages: 9,
